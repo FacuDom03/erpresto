@@ -76,6 +76,49 @@ export function formatDateTime(iso: string | null | undefined): string {
   return dateTimeFormatter.format(date);
 }
 
+const dateFormatter = new Intl.DateTimeFormat("es-AR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+/** Fecha local corta (dd/mm/aaaa). */
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return dateFormatter.format(date);
+}
+
+const MONTH_NAMES_ES = [
+  "enero",
+  "febrero",
+  "marzo",
+  "abril",
+  "mayo",
+  "junio",
+  "julio",
+  "agosto",
+  "septiembre",
+  "octubre",
+  "noviembre",
+  "diciembre",
+];
+
+/**
+ * Cumpleaños como "12 de mayo". Toma día y mes de la parte de fecha del ISO
+ * (sin convertir zona horaria, para no correr el día).
+ */
+export function formatBirthday(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!match) return "—";
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return "—";
+  return `${day} de ${MONTH_NAMES_ES[month - 1]}`;
+}
+
 /** Tiempo transcurrido en formato mm:ss (puede superar los 60 minutos). */
 export function formatElapsed(fromIso: string, now: number): string {
   const from = new Date(fromIso).getTime();

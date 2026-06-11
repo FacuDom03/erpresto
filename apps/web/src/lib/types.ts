@@ -317,6 +317,120 @@ export interface ProductRecipeDetail {
 }
 
 // ---------------------------------------------------------------------------
+// Compras (órdenes de compra)
+// ---------------------------------------------------------------------------
+
+export type PurchaseOrderStatus =
+  | "DRAFT"
+  | "SENT"
+  | "PARTIALLY_RECEIVED"
+  | "RECEIVED"
+  | "CANCELLED";
+
+export interface PurchaseOrderItem {
+  id: string;
+  rawMaterialId: string;
+  rawMaterial?: { id: string; name: string; unit: MeasureUnit } | null;
+  quantity: number;
+  receivedQty: number;
+  unitCost: number;
+  subtotal: number;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  number?: number;
+  status: PurchaseOrderStatus;
+  branchId?: string | null;
+  branch?: { id: string; name: string } | null;
+  supplierId?: string | null;
+  supplier?: { id: string; name: string } | null;
+  expectedAt?: string | null;
+  notes?: string | null;
+  total: number;
+  /** Cantidad de líneas (solo en el listado). */
+  itemsCount?: number;
+  createdAt?: string;
+  items: PurchaseOrderItem[];
+}
+
+// ---------------------------------------------------------------------------
+// Clientes
+// ---------------------------------------------------------------------------
+
+export interface CustomerStats {
+  ordersCount: number;
+  totalSpent: number;
+  lastOrderAt: string | null;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  taxId?: string | null;
+  /** Fecha de cumpleaños (ISO; puede venir como fecha sola). */
+  birthday?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  /** Puntos de fidelización. */
+  loyaltyPoints: number;
+  active: boolean;
+  /** Solo en GET /customers/:id. */
+  stats?: CustomerStats | null;
+}
+
+// ---------------------------------------------------------------------------
+// Reservas
+// ---------------------------------------------------------------------------
+
+export type ReservationStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "SEATED"
+  | "CANCELLED"
+  | "NO_SHOW";
+
+export interface Reservation {
+  id: string;
+  branchId?: string | null;
+  name: string;
+  phone?: string | null;
+  partySize: number;
+  scheduledAt: string;
+  status: ReservationStatus;
+  tableId?: string | null;
+  table?: { id: string; name: string } | null;
+  customerId?: string | null;
+  customer?: { id: string; name: string } | null;
+  notes?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+export interface DashboardSummary {
+  salesToday: { total: number; count: number; avgTicket: number };
+  salesByMethod: { method: PaymentMethod; total: number }[];
+  weekSales: { date: string; total: number }[];
+  topProducts: { name: string; quantity: number; total: number }[];
+  openOrders: number;
+  tables: { occupied: number; total: number };
+  cash: { open: boolean; expectedAmount: number } | null;
+  criticalRawMaterials: {
+    count: number;
+    items: { name: string; totalStock: number; minStock: number; unit: MeasureUnit }[];
+  };
+  criticalProducts: {
+    count: number;
+    items: { name: string; quantity: number; minStock: number }[];
+  };
+  upcomingReservations: number;
+}
+
+// ---------------------------------------------------------------------------
 // Proveedores
 // ---------------------------------------------------------------------------
 
