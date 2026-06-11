@@ -1,0 +1,73 @@
+import { apiFetch } from "@/lib/api";
+import type { Category, Product } from "@/lib/types";
+
+/**
+ * Shape ASUMIDO de la respuesta paginada del backend:
+ *   GET /products?page=&limit=&search=&categoryId= → { data: Product[], total: number }
+ *
+ * Si el backend devuelve otro formato (por ej. { items, meta: { total } }),
+ * ajustar SOLO la función `normalizeProductList` de este archivo.
+ */
+export interface ProductListResult {
+  data: Product[];
+  total: number;
+}
+
+function normalizeProductList(raw: unknown): ProductListResult {
+  const res = raw as { data?: Product[]; total?: number };
+  return {
+    data: Array.isArray(res?.data) ? res.data : [],
+    total: typeof res?.total === "number" ? res.total : 0,
+  };
+}
+
+export interface ProductListParams {
+  page: number;
+  limit: number;
+  search?: string;
+  categoryId?: string;
+}
+
+export async function getProducts(
+  params: ProductListParams,
+): Promise<ProductListResult> {
+  const query = new URLSearchParams({
+    page: String(params.page),
+    limit: String(params.limit),
+  });
+  if (params.search) query.set("search", params.search);
+  if (params.categoryId) query.set("categoryId", params.categoryId);
+
+  const raw = await apiFetch<unknown>(`/products?${query.toString()}`);
+  return normalizeProductList(raw);
+}
+
+export interface ProductPayload {
+  name: string;
+  sku: string;
+  price: number;
+  categoryId?: string | null;
+  description?: string | null;
+}
+
+export function createProduct(payload: ProductPayload): Promise<Product> {
+  return apiFetch<Product>("/products", { method: "POST", body: payload });
+}
+
+export function updateProduct(
+  id: string,
+  payload: Partial<ProductPayload>,
+): Promise<Product> {
+  return apiFetch<Product>(`/products/${id}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export function deleteProduct(id: string): Promise<void> {
+  return apiFetch<void>(`/products/${id}`, { method: "DELETE" });
+}
+
+export function getCategories(): Promise<Category[]> {
+  return apiFetch<Category[]>("/categories");
+}
