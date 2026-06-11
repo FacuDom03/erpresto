@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 
 import { AuthProvider } from "@/lib/auth";
+import { BranchProvider } from "@/lib/branch";
 import { Toaster } from "@/components/ui/sonner";
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -30,8 +31,10 @@ export function Providers({ children }: { children: ReactNode }) {
     >
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          {children}
-          <Toaster />
+          <BranchProvider>
+            {children}
+            <Toaster />
+          </BranchProvider>
         </AuthProvider>
       </QueryClientProvider>
     </ThemeProvider>

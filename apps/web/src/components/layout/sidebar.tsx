@@ -21,6 +21,7 @@ import {
   Truck,
   UtensilsCrossed,
   Users,
+  Wallet,
   Wheat,
   type LucideIcon,
 } from "lucide-react";
@@ -55,6 +56,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "POS", href: "/pos", icon: MonitorSmartphone },
       { title: "Cocina (KDS)", href: "/cocina", icon: CookingPot },
       { title: "Pedidos", href: "/pedidos", icon: ClipboardList },
+      { title: "Caja", href: "/caja", icon: Wallet },
     ],
   },
   {

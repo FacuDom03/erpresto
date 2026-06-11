@@ -84,6 +84,16 @@
   --animate-overlay-in: overlay-in 0.15s ease-out;
   --animate-dialog-in: dialog-in 0.15s ease-out;
   --animate-menu-in: menu-in 0.12s ease-out;
+  --animate-sheet-in: sheet-in 0.2s ease-out;
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 @keyframes overlay-in {

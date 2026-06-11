@@ -3,6 +3,7 @@
 import { PanelLeft, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { BranchSelector } from "@/components/layout/branch-selector";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { UserMenu } from "@/components/layout/user-menu";
 
@@ -38,6 +39,7 @@ export function Header({
       </button>
 
       <div className="ml-auto flex items-center gap-1.5">
+        <BranchSelector />
         <ThemeToggle />
         <UserMenu />
       </div>

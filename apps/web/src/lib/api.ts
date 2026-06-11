@@ -22,16 +22,24 @@ export const NETWORK_ERROR_MESSAGE = "No se pudo conectar con el servidor";
 export class ApiError extends Error {
   /** Código HTTP. 0 indica error de red (servidor caído / sin conexión). */
   readonly status: number;
+  /** Cuerpo JSON del error (si lo hubo). Útil para metadata como `orderId`. */
+  readonly data?: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, data?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.data = data;
   }
 
   get isNetworkError(): boolean {
     return this.status === 0;
   }
+}
+
+/** Mensaje legible de un error desconocido (ApiError → su message). */
+export function getErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,15 +140,22 @@ export interface ApiFetchOptions {
   signal?: AbortSignal;
 }
 
-async function parseErrorMessage(res: Response): Promise<string> {
+async function parseErrorBody(res: Response): Promise<unknown> {
   try {
-    const data = await res.json();
-    if (typeof data?.message === "string") return data.message;
-    if (Array.isArray(data?.message)) return data.message.join(". ");
-    if (typeof data?.error === "string") return data.error;
+    return await res.json();
   } catch {
-    // cuerpo no-JSON: usamos el mensaje genérico
+    // cuerpo no-JSON
+    return undefined;
   }
+}
+
+function errorMessageFrom(body: unknown, res: Response): string {
+  const data = body as
+    | { message?: string | string[]; error?: string }
+    | undefined;
+  if (typeof data?.message === "string") return data.message;
+  if (Array.isArray(data?.message)) return data.message.join(". ");
+  if (typeof data?.error === "string") return data.error;
   return `Error ${res.status}: ${res.statusText || "solicitud fallida"}`;
 }
 
@@ -185,7 +200,8 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    throw new ApiError(res.status, await parseErrorMessage(res));
+    const errorBody = await parseErrorBody(res);
+    throw new ApiError(res.status, errorMessageFrom(errorBody, res), errorBody);
   }
 
   if (res.status === 204) {
