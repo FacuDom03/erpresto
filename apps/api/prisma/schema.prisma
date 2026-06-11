@@ -1,0 +1,941 @@
+// ============================================================
+// ERPresto — Schema de base de datos
+// ERP gastronómico SaaS multi-tenant para Argentina
+//
+// Principios de diseño:
+// - Multi-tenant: toda tabla operativa lleva tenantId. El
+//   aislamiento se refuerza en la capa de aplicación (guard +
+//   Prisma extension que inyecta el filtro de tenant).
+// - Offline-first: PKs UUID generadas en cliente, columnas
+//   deviceId/version en movimientos, tabla SyncEvent como outbox.
+// - Doble stock INDEPENDIENTE: materia prima (RawMaterial) y
+//   producción/platos (ProductStock) no tienen relación
+//   obligatoria. La vinculación es opcional vía Recipe y se
+//   controla con StockLinkMode por producto y por tenant.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// TENANCY
+// ============================================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  cuit      String?
+  plan      TenantPlan @default(TRIAL)
+  // Configuración flexible: modo de stock global, módulos
+  // habilitados, preferencias de operación, etc.
+  settings  Json     @default("{}")
+  stockMode StockConfigMode @default(BOTH_INDEPENDENT)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branches        Branch[]
+  users           User[]
+  roles           Role[]
+  categories      Category[]
+  products        Product[]
+  rawMaterials    RawMaterial[]
+  suppliers       Supplier[]
+  customers       Customer[]
+  orders          Order[]
+  purchaseOrders  PurchaseOrder[]
+  invoices        Invoice[]
+  auditLogs       AuditLog[]
+  syncEvents      SyncEvent[]
+}
+
+enum TenantPlan {
+  TRIAL
+  BASIC
+  PRO
+  ENTERPRISE
+}
+
+// Modos de trabajo de stock (configurable por tenant; el modo
+// PER_PRODUCT delega la decisión a Product.stockLinkMode)
+enum StockConfigMode {
+  RAW_ONLY           // Modo 1: solo materia prima
+  PRODUCTION_ONLY    // Modo 2: solo stock de platos
+  BOTH_INDEPENDENT   // Modo 3: ambos, sin vínculo
+  AUTO_CONVERSION    // Modo 4: conversión automática vía receta
+  MANUAL_ASSISTED    // Modo 5: conversión manual asistida
+  PER_PRODUCT        // Modo 6: configuración individual por producto
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  address   String?
+  phone     String?
+  timezone  String   @default("America/Argentina/Buenos_Aires")
+  settings  Json     @default("{}")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userBranches    UserBranch[]
+  areas           Area[]
+  warehouses      Warehouse[]
+  cashRegisters   CashRegister[]
+  orders          Order[]
+  reservations    Reservation[]
+  productStocks   ProductStock[]
+  productionOrders ProductionOrder[]
+  purchaseOrders  PurchaseOrder[]
+  invoices        Invoice[]
+
+  @@index([tenantId])
+}
+
+// ============================================================
+// USUARIOS, ROLES Y PERMISOS (RBAC)
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  pin          String?  // PIN corto para POS táctil
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userRoles    UserRole[]
+  userBranches UserBranch[]
+  sessions     Session[]
+  auditLogs    AuditLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+// Asignación de usuarios a sucursales
+model UserBranch {
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  // null => rol de sistema predefinido (Dueño, Mozo, Cocina, etc.)
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  code      String?  // identificador estable para roles de sistema
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+// Catálogo global de permisos granulares
+// (products.create, products.delete, cash.open, costs.view, ...)
+model Permission {
+  id          String @id @default(uuid())
+  code        String @unique
+  module      String
+  description String
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// Auditoría de sesiones: IP, dispositivo, navegador, fecha/hora
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String
+  ip               String?
+  device           String?
+  browser          String?
+  userAgent        String?
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // create | update | delete | login | cash.open | ...
+  entity    String
+  entityId  String?
+  data      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, entity])
+  @@index([tenantId, createdAt])
+}
+
+// ============================================================
+// CATÁLOGO DE PRODUCTOS (lo que se VENDE)
+// ============================================================
+
+model Category {
+  id        String     @id @default(uuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryTree")
+  color     String?
+  sortOrder Int        @default(0)
+  active    Boolean    @default(true)
+
+  products Product[]
+
+  @@index([tenantId])
+}
+
+// Vinculación opcional de un producto con materia prima.
+// Por defecto INHERIT: usa el modo global del tenant.
+enum StockLinkMode {
+  INHERIT       // usa Tenant.stockMode
+  NONE          // no controla stock
+  INDEPENDENT   // descuenta solo ProductStock
+  LINKED_AUTO   // descuenta materia prima vía receta automáticamente
+  LINKED_MANUAL // sugiere descuento de materia prima, confirma el usuario
+}
+
+model Product {
+  id           String        @id @default(uuid())
+  tenantId     String
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  name         String
+  sku          String?
+  description  String?
+  imageUrl     String?
+  price        Decimal       @db.Decimal(12, 2)
+  taxRate      Decimal       @default(21) @db.Decimal(5, 2)
+  // Destinos de impresión/preparación: cocina, barra, etc.
+  printStation String?
+  stockLinkMode StockLinkMode @default(INHERIT)
+  trackStock   Boolean       @default(false)
+  minStock     Decimal?      @db.Decimal(12, 3)
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  recipe        Recipe?
+  productStocks ProductStock[]
+  stockMovements ProductStockMovement[]
+  orderItems    OrderItem[]
+  productionItems ProductionItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([tenantId, categoryId])
+}
+
+// ============================================================
+// STOCK 1: MATERIA PRIMA (independiente del stock de platos)
+// ============================================================
+
+enum MeasureUnit {
+  UNIT
+  KG
+  G
+  L
+  ML
+  PACK
+}
+
+model RawMaterial {
+  id        String      @id @default(uuid())
+  tenantId  String
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  sku       String?
+  unit      MeasureUnit @default(UNIT)
+  category  String?     // carnes, lácteos, bebidas, limpieza, packaging...
+  minStock  Decimal?    @db.Decimal(12, 3)
+  avgCost   Decimal     @default(0) @db.Decimal(12, 4)
+  lastCost  Decimal     @default(0) @db.Decimal(12, 4)
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  batches         StockBatch[]
+  movements       RawStockMovement[]
+  recipeItems     RecipeItem[]
+  purchaseItems   PurchaseOrderItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+}
+
+model Warehouse {
+  id        String  @id @default(uuid())
+  branchId  String
+  branch    Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name      String
+  isDefault Boolean @default(false)
+  active    Boolean @default(true)
+
+  batches   StockBatch[]
+  movements RawStockMovement[]
+
+  @@index([branchId])
+}
+
+// Lotes con vencimiento: el stock disponible de una materia
+// prima en un depósito es la suma de sus lotes.
+model StockBatch {
+  id            String      @id @default(uuid())
+  warehouseId   String
+  warehouse     Warehouse   @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  rawMaterialId String
+  rawMaterial   RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  lotCode       String?
+  quantity      Decimal     @db.Decimal(12, 3)
+  unitCost      Decimal     @default(0) @db.Decimal(12, 4)
+  expiresAt     DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([warehouseId, rawMaterialId])
+  @@index([expiresAt])
+}
+
+enum RawMovementType {
+  PURCHASE          // ingreso por compra
+  ADJUSTMENT        // ajuste de inventario
+  WASTE             // merma
+  TRANSFER_IN
+  TRANSFER_OUT
+  PRODUCTION_CONSUME // consumo por producción (si hay vínculo)
+  SALE_CONSUME       // consumo directo por venta (LINKED_AUTO)
+  INVENTORY          // conteo físico
+}
+
+model RawStockMovement {
+  id            String          @id @default(uuid())
+  warehouseId   String
+  warehouse     Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  rawMaterialId String
+  rawMaterial   RawMaterial     @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  type          RawMovementType
+  quantity      Decimal         @db.Decimal(12, 3) // positivo entra, negativo sale
+  unitCost      Decimal?        @db.Decimal(12, 4)
+  reference     String?         // id de compra, producción, venta, etc.
+  notes         String?
+  userId        String?
+  // Offline-first
+  deviceId      String?
+  version       Int             @default(1)
+  occurredAt    DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+
+  @@index([warehouseId, rawMaterialId])
+  @@index([occurredAt])
+}
+
+// ============================================================
+// STOCK 2: PRODUCCIÓN / PLATOS (independiente de materia prima)
+// ============================================================
+
+model ProductStock {
+  id        String  @id @default(uuid())
+  branchId  String
+  branch    Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Decimal @default(0) @db.Decimal(12, 3)
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, productId])
+}
+
+enum ProductMovementType {
+  PRODUCTION // el chef cargó producción (+)
+  SALE       // venta (-)
+  ADJUSTMENT
+  WASTE
+  MANUAL     // carga manual directa
+}
+
+model ProductStockMovement {
+  id         String              @id @default(uuid())
+  branchId   String
+  productId  String
+  product    Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type       ProductMovementType
+  quantity   Decimal             @db.Decimal(12, 3)
+  reference  String?
+  notes      String?
+  userId     String?
+  deviceId   String?
+  version    Int                 @default(1)
+  occurredAt DateTime            @default(now())
+  createdAt  DateTime            @default(now())
+
+  @@index([branchId, productId])
+  @@index([occurredAt])
+}
+
+// Órdenes de producción del chef: "+20 rabas, +15 milanesas"
+enum ProductionStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+model ProductionOrder {
+  id        String           @id @default(uuid())
+  branchId  String
+  branch    Branch           @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  status    ProductionStatus @default(CONFIRMED)
+  // Si true y existe receta, descuenta materia prima
+  consumeRawMaterials Boolean @default(false)
+  notes     String?
+  userId    String?
+  deviceId  String?
+  createdAt DateTime         @default(now())
+
+  items ProductionItem[]
+
+  @@index([branchId])
+}
+
+model ProductionItem {
+  id                String          @id @default(uuid())
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity          Decimal         @db.Decimal(12, 3)
+}
+
+// ============================================================
+// MOTOR DE CONVERSIÓN (recetas) — SIEMPRE OPCIONAL
+// ============================================================
+
+model Recipe {
+  id        String  @id @default(uuid())
+  productId String  @unique
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Rinde: 1 kg de raba = 5 porciones => yieldQuantity 5
+  yieldQuantity Decimal @default(1) @db.Decimal(12, 3)
+  active    Boolean @default(true)
+  updatedAt DateTime @updatedAt
+
+  items RecipeItem[]
+}
+
+model RecipeItem {
+  id            String      @id @default(uuid())
+  recipeId      String
+  recipe        Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  rawMaterialId String
+  rawMaterial   RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  quantity      Decimal     @db.Decimal(12, 4)
+  wastePercent  Decimal     @default(0) @db.Decimal(5, 2)
+}
+
+// ============================================================
+// SALÓN: editor visual + mapa operativo
+// ============================================================
+
+model Area {
+  id       String @id @default(uuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name     String // salón principal, patio, terraza, barra...
+  sortOrder Int   @default(0)
+
+  tables DiningTable[]
+
+  @@index([branchId])
+}
+
+enum TableShape {
+  ROUND
+  SQUARE
+  RECTANGLE
+  BOX
+  BAR
+  DECOR // objetos no operativos: caja, baños, cocina, plantas
+}
+
+enum TableStatus {
+  FREE
+  RESERVED
+  OCCUPIED
+  WAITING_KITCHEN
+  WAITING_BILL
+  OUT_OF_SERVICE
+}
+
+model DiningTable {
+  id       String      @id @default(uuid())
+  areaId   String
+  area     Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  name     String
+  shape    TableShape  @default(SQUARE)
+  capacity Int         @default(4)
+  status   TableStatus @default(FREE)
+  // Layout del editor drag & drop
+  x        Float       @default(0)
+  y        Float       @default(0)
+  width    Float       @default(80)
+  height   Float       @default(80)
+  rotation Float       @default(0)
+  color    String?
+  // Mesas unidas: apuntan a una mesa principal
+  mergedIntoId String?
+  merged       DiningTable?  @relation("MergedTables", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedTables DiningTable[] @relation("MergedTables")
+  active   Boolean     @default(true)
+
+  orders       Order[]
+  reservations Reservation[]
+
+  @@index([areaId])
+}
+
+model Reservation {
+  id         String    @id @default(uuid())
+  branchId   String
+  branch     Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tableId    String?
+  table      DiningTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  name       String
+  phone      String?
+  partySize  Int
+  scheduledAt DateTime
+  notes      String?
+  status     ReservationStatus @default(PENDING)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([branchId, scheduledAt])
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  CANCELLED
+  NO_SHOW
+}
+
+// ============================================================
+// VENTAS: pedidos, POS, cocina (KDS)
+// ============================================================
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+  COUNTER
+}
+
+enum OrderStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+model Order {
+  id          String      @id @default(uuid())
+  tenantId    String
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String
+  branch      Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tableId     String?
+  table       DiningTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  customerId  String?
+  customer    Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  type        OrderType   @default(DINE_IN)
+  status      OrderStatus @default(OPEN)
+  number      Int         // correlativo por sucursal
+  waiterId    String?     // mozo asignado
+  peopleCount Int?
+  subtotal    Decimal     @default(0) @db.Decimal(12, 2)
+  discount    Decimal     @default(0) @db.Decimal(12, 2)
+  tip         Decimal     @default(0) @db.Decimal(12, 2)
+  total       Decimal     @default(0) @db.Decimal(12, 2)
+  notes       String?
+  deviceId    String?
+  version     Int         @default(1)
+  openedAt    DateTime    @default(now())
+  closedAt    DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  items    OrderItem[]
+  payments Payment[]
+  invoices Invoice[]
+  delivery DeliveryInfo?
+
+  @@unique([branchId, number])
+  @@index([tenantId, branchId, status])
+  @@index([branchId, openedAt])
+}
+
+enum OrderItemStatus {
+  PENDING
+  SENT       // enviado a cocina
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+model OrderItem {
+  id        String          @id @default(uuid())
+  orderId   String
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity  Decimal         @db.Decimal(12, 3)
+  unitPrice Decimal         @db.Decimal(12, 2)
+  notes     String?         // observaciones para cocina
+  status    OrderItemStatus @default(PENDING)
+  station   String?         // cocina, barra...
+  sentAt    DateTime?
+  readyAt   DateTime?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+}
+
+enum PaymentMethod {
+  CASH
+  CARD_DEBIT
+  CARD_CREDIT
+  QR
+  MERCADOPAGO
+  TRANSFER
+  ACCOUNT  // cuenta corriente
+  OTHER
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  orderId   String
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  method    PaymentMethod
+  amount    Decimal       @db.Decimal(12, 2)
+  reference String?
+  cashSessionId String?
+  cashSession   CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
+  createdAt DateTime      @default(now())
+
+  @@index([orderId])
+}
+
+// ============================================================
+// CAJA
+// ============================================================
+
+model CashRegister {
+  id       String @id @default(uuid())
+  branchId String
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name     String
+  active   Boolean @default(true)
+
+  sessions CashSession[]
+
+  @@index([branchId])
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+model CashSession {
+  id             String            @id @default(uuid())
+  registerId     String
+  register       CashRegister      @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  status         CashSessionStatus @default(OPEN)
+  openedById     String
+  closedById     String?
+  openingAmount  Decimal           @db.Decimal(12, 2)
+  closingAmount  Decimal?          @db.Decimal(12, 2)
+  expectedAmount Decimal?          @db.Decimal(12, 2)
+  difference     Decimal?          @db.Decimal(12, 2)
+  openedAt       DateTime          @default(now())
+  closedAt       DateTime?
+
+  movements CashMovement[]
+  payments  Payment[]
+
+  @@index([registerId, status])
+}
+
+enum CashMovementType {
+  SALE
+  WITHDRAWAL
+  DEPOSIT
+  EXPENSE
+  TIP
+}
+
+model CashMovement {
+  id        String           @id @default(uuid())
+  sessionId String
+  session   CashSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type      CashMovementType
+  amount    Decimal          @db.Decimal(12, 2)
+  notes     String?
+  userId    String?
+  createdAt DateTime         @default(now())
+
+  @@index([sessionId])
+}
+
+// ============================================================
+// COMPRAS Y PROVEEDORES
+// ============================================================
+
+model Supplier {
+  id           String  @id @default(uuid())
+  tenantId     String
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  cuit         String?
+  contactName  String?
+  phone        String?
+  email        String?
+  address      String?
+  deliveryDays Int?    // tiempo de entrega en días
+  rating       Int?    // 1-5
+  notes        String?
+  active       Boolean @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([tenantId])
+}
+
+enum PurchaseStatus {
+  DRAFT
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id         String         @id @default(uuid())
+  tenantId   String
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId   String
+  branch     Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  supplierId String
+  supplier   Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  status     PurchaseStatus @default(DRAFT)
+  number     Int
+  notes      String?
+  expectedAt DateTime?
+  total      Decimal        @default(0) @db.Decimal(12, 2)
+  userId     String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  items PurchaseOrderItem[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  rawMaterialId   String
+  rawMaterial     RawMaterial   @relation(fields: [rawMaterialId], references: [id], onDelete: Restrict)
+  quantity        Decimal       @db.Decimal(12, 3)
+  receivedQty     Decimal       @default(0) @db.Decimal(12, 3)
+  unitCost        Decimal       @db.Decimal(12, 4)
+}
+
+// ============================================================
+// CLIENTES Y DELIVERY
+// ============================================================
+
+model Customer {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  phone     String?
+  taxId     String?  // CUIT/DNI para facturación
+  birthday  DateTime?
+  address   String?
+  points    Int      @default(0)
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders       Order[]
+  reservations Reservation[]
+  invoices     Invoice[]
+
+  @@index([tenantId])
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+model DeliveryInfo {
+  id          String         @id @default(uuid())
+  orderId     String         @unique
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  address     String
+  status      DeliveryStatus @default(PENDING)
+  courierId   String?        // repartidor (User)
+  estimatedAt DateTime?
+  deliveredAt DateTime?
+  notes       String?
+}
+
+// ============================================================
+// FACTURACIÓN ARGENTINA (preparado para ARCA)
+// ============================================================
+
+enum InvoiceType {
+  FACTURA_A
+  FACTURA_B
+  FACTURA_C
+  NOTA_CREDITO_A
+  NOTA_CREDITO_B
+  NOTA_CREDITO_C
+  TICKET
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING_CAE
+  ISSUED
+  REJECTED
+  CANCELLED
+}
+
+model Invoice {
+  id          String        @id @default(uuid())
+  tenantId    String
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String
+  branch      Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  orderId     String?
+  order       Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customerId  String?
+  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  type        InvoiceType
+  status      InvoiceStatus @default(DRAFT)
+  pointOfSale Int
+  number      Int?
+  cae         String?
+  caeExpiry   DateTime?
+  netAmount   Decimal       @default(0) @db.Decimal(12, 2)
+  taxAmount   Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount Decimal       @default(0) @db.Decimal(12, 2)
+  arcaPayload Json?
+  issuedAt    DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([tenantId, branchId])
+}
+
+// ============================================================
+// SINCRONIZACIÓN OFFLINE-FIRST (outbox de eventos)
+// ============================================================
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  CONFLICT
+}
+
+model SyncEvent {
+  id        String     @id @default(uuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId  String?
+  entity    String
+  entityId  String
+  action    String     // create | update | delete
+  payload   Json
+  version   Int
+  deviceId  String?
+  userId    String?
+  status    SyncStatus @default(PENDING)
+  occurredAt DateTime
+  createdAt DateTime   @default(now())
+
+  @@index([tenantId, status])
+  @@index([entity, entityId])
+}

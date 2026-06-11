@@ -1,0 +1,18 @@
+{
+  "name": "erpresto",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ERP gastronómico SaaS multi-tenant para el mercado argentino",
+  "scripts": {
+    "install:all": "npm install --prefix apps/api && npm install --prefix apps/web",
+    "dev:api": "npm run start:dev --prefix apps/api",
+    "dev:web": "npm run dev --prefix apps/web",
+    "build:api": "npm run build --prefix apps/api",
+    "build:web": "npm run build --prefix apps/web",
+    "db:migrate": "npm run prisma:migrate --prefix apps/api",
+    "db:seed": "npm run prisma:seed --prefix apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
