@@ -130,7 +130,7 @@ export class RawMaterialsService {
         data: {
           warehouseId: dto.warehouseId,
           rawMaterialId: id,
-          type: RawMovementType.ADJUSTMENT,
+          type: dto.type ?? RawMovementType.ADJUSTMENT,
           quantity,
           ...(dto.unitCost !== undefined ? { unitCost: new Prisma.Decimal(dto.unitCost) } : {}),
           notes: dto.notes,

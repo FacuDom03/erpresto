@@ -20,12 +20,20 @@ export class AdjustProductStockDto {
   quantity!: number;
 
   @ApiPropertyOptional({
-    enum: [ProductMovementType.MANUAL, ProductMovementType.ADJUSTMENT],
+    enum: [
+      ProductMovementType.MANUAL,
+      ProductMovementType.ADJUSTMENT,
+      ProductMovementType.WASTE,
+    ],
     default: ProductMovementType.ADJUSTMENT,
   })
   @IsOptional()
   @IsEnum(ProductMovementType)
-  @IsIn([ProductMovementType.MANUAL, ProductMovementType.ADJUSTMENT])
+  @IsIn([
+    ProductMovementType.MANUAL,
+    ProductMovementType.ADJUSTMENT,
+    ProductMovementType.WASTE,
+  ])
   type?: ProductMovementType;
 
   @ApiPropertyOptional()

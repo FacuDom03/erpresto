@@ -42,6 +42,10 @@ export async function getProducts(
   return normalizeProductList(raw);
 }
 
+export function getProduct(id: string): Promise<Product> {
+  return apiFetch<Product>(`/products/${encodeURIComponent(id)}`);
+}
+
 export interface ProductPayload {
   name: string;
   sku: string;

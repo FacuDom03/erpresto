@@ -1,10 +1,36 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, IsUUID, NotEquals } from 'class-validator';
+import { RawMovementType } from '@prisma/client';
+import {
+  IsEnum,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  NotEquals,
+} from 'class-validator';
 
 export class AdjustRawStockDto {
   @ApiProperty({ description: 'Depósito donde se ajusta el stock' })
   @IsUUID('4')
   warehouseId!: string;
+
+  @ApiPropertyOptional({
+    enum: [
+      RawMovementType.ADJUSTMENT,
+      RawMovementType.WASTE,
+      RawMovementType.INVENTORY,
+    ],
+    default: RawMovementType.ADJUSTMENT,
+  })
+  @IsOptional()
+  @IsEnum(RawMovementType)
+  @IsIn([
+    RawMovementType.ADJUSTMENT,
+    RawMovementType.WASTE,
+    RawMovementType.INVENTORY,
+  ])
+  type?: RawMovementType;
 
   @ApiProperty({
     example: 5.5,
