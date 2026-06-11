@@ -178,6 +178,20 @@ export class RawMaterialsService {
     });
   }
 
+  // ----------------------------------------------------------
+  // GET /warehouses?branchId= — depósitos de una sucursal
+  // ----------------------------------------------------------
+  async findWarehouses(tenantId: string, branchId: string) {
+    const branch = await this.prisma.branch.findFirst({ where: { id: branchId, tenantId } });
+    if (!branch) {
+      throw new BadRequestException('La sucursal no pertenece al tenant');
+    }
+    return this.prisma.warehouse.findMany({
+      where: { branchId },
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+    });
+  }
+
   private async assertExists(tenantId: string, id: string): Promise<void> {
     const exists = await this.prisma.rawMaterial.findFirst({ where: { id, tenantId } });
     if (!exists) {

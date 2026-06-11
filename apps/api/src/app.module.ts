@@ -16,8 +16,10 @@ import { ProductStockModule } from './product-stock/product-stock.module';
 import { ProductsModule } from './products/products.module';
 import { RawMaterialsModule } from './raw-materials/raw-materials.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { RecipesModule } from './recipes/recipes.module';
 import { RolesModule } from './roles/roles.module';
 import { SalonModule } from './salon/salon.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { UsersModule } from './users/users.module';
 
@@ -35,7 +37,9 @@ import { UsersModule } from './users/users.module';
     RolesModule,
     CategoriesModule,
     ProductsModule,
+    RecipesModule,
     RawMaterialsModule,
+    SuppliersModule,
     ProductStockModule,
     SalonModule,
     OrdersModule,

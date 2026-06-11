@@ -165,6 +165,8 @@ const SYSTEM_ROLES: { code: string; name: string; permissions: string[] }[] = [
     permissions: [
       'dashboard.view',
       'products.view',
+      'recipes.update',
+      'costs.view',
       'stock.view',
       'stock.adjust',
       'production.view',
@@ -237,7 +239,6 @@ const SYSTEM_ROLES: { code: string; name: string; permissions: string[] }[] = [
     name: 'Cocina',
     permissions: [
       'products.view',
-      'recipes.update',
       'stock.view',
       'stock.adjust',
       'production.view',
