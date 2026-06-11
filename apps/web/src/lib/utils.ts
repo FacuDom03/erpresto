@@ -28,6 +28,26 @@ export function toNumber(value: unknown): number {
   return 0;
 }
 
+const quantityFormatter = new Intl.NumberFormat("es-AR", {
+  maximumFractionDigits: 3,
+});
+
+/** Cantidad con hasta 3 decimales en formato es-AR (1.234,5). */
+export function formatQuantity(value: number): string {
+  return quantityFormatter.format(value);
+}
+
+/**
+ * Parsea un número ingresado por el usuario (acepta coma decimal).
+ * Devuelve null si está vacío o no es un número válido.
+ */
+export function parseDecimal(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 const timeFormatter = new Intl.DateTimeFormat("es-AR", {
   hour: "2-digit",
   minute: "2-digit",

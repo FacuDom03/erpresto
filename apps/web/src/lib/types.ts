@@ -18,6 +18,9 @@ export interface Category {
   id: string;
   name: string;
   description?: string | null;
+  color?: string | null;
+  sortOrder?: number;
+  parentId?: string | null;
 }
 
 export interface Product {
@@ -205,4 +208,129 @@ export interface CashRegister {
   branchId: string;
   name: string;
   currentSession?: CashSession | null;
+}
+
+// ---------------------------------------------------------------------------
+// Stock: materia prima y depósitos
+// ---------------------------------------------------------------------------
+
+export type MeasureUnit = "UNIT" | "KG" | "G" | "L" | "ML" | "PACK";
+
+export interface WarehouseStock {
+  warehouseId: string;
+  warehouseName: string | null;
+  branchId: string | null;
+  quantity: number;
+}
+
+export interface RawMaterial {
+  id: string;
+  name: string;
+  sku?: string | null;
+  unit: MeasureUnit;
+  category?: string | null;
+  minStock: number | null;
+  avgCost: number;
+  lastCost: number;
+  totalStock: number;
+  stockByWarehouse: WarehouseStock[];
+  active?: boolean;
+}
+
+export interface Warehouse {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+  active?: boolean;
+}
+
+/** Tipos de ajuste manual de materia prima. */
+export type RawAdjustType = "ADJUSTMENT" | "WASTE" | "INVENTORY";
+
+// ---------------------------------------------------------------------------
+// Stock de producción (platos)
+// ---------------------------------------------------------------------------
+
+export interface ProductStockEntry {
+  productId: string;
+  branchId: string;
+  quantity: number;
+  product: {
+    id: string;
+    name: string;
+    sku?: string | null;
+    minStock: number | null;
+  };
+}
+
+/** Tipos de ajuste manual del stock de platos. */
+export type ProductAdjustType = "MANUAL" | "ADJUSTMENT" | "WASTE";
+
+// ---------------------------------------------------------------------------
+// Recetas y costos
+// ---------------------------------------------------------------------------
+
+/** Fila de GET /recipes: producto con resumen de costo. */
+export interface RecipeSummary {
+  /** id del producto. */
+  id: string;
+  name: string;
+  price: number;
+  categoryName: string | null;
+  hasRecipe: boolean;
+  /** true si la receta está activa (false también cuando no hay receta). */
+  active: boolean;
+  unitCost: number | null;
+  marginPercent: number | null;
+}
+
+export interface RecipeItem {
+  id?: string;
+  rawMaterialId: string;
+  quantity: number;
+  wastePercent: number;
+  rawMaterial?: {
+    id: string;
+    name: string;
+    unit: MeasureUnit;
+    avgCost: number;
+  } | null;
+}
+
+export interface Recipe {
+  yieldQuantity: number;
+  active: boolean;
+  items: RecipeItem[];
+}
+
+export interface RecipeCost {
+  ingredientsCost: number;
+  unitCost: number;
+  price: number;
+  margin: number;
+  marginPercent: number | null;
+}
+
+export interface ProductRecipeDetail {
+  recipe: Recipe | null;
+  cost: RecipeCost | null;
+}
+
+// ---------------------------------------------------------------------------
+// Proveedores
+// ---------------------------------------------------------------------------
+
+export interface Supplier {
+  id: string;
+  name: string;
+  cuit?: string | null;
+  contactName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  deliveryDays?: number | null;
+  /** Calificación 1-5. */
+  rating?: number | null;
+  notes?: string | null;
+  active: boolean;
 }
