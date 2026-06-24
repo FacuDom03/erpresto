@@ -1,6 +1,8 @@
 # Módulos funcionales — ERPresto
 
-Estado: ✅ implementado en Fase 0 · 🔜 fase planificada (ver [roadmap](04-roadmap.md)).
+Estado: ✅ implementado · 🔜 fase planificada (ver [roadmap](04-roadmap.md)).
+
+> **Actualización (Fases 1–3 entregadas).** Las tablas de abajo reflejan el plan original de la Fase 0. Desde entonces se implementaron y verificaron contra base real: editor visual y mapa operativo del salón, POS con pagos mixtos, KDS, caja con arqueo, recetas con costos y márgenes, compras con costo promedio ponderado, reservas, clientes, dashboard real, facturación ARCA (mock activo + adaptador real WSFEv1 preparado), Mercado Pago (QR), delivery y reportes exportables (CSV/Excel/PDF). El [roadmap](04-roadmap.md) es la fuente de verdad del estado por fase.
 
 ## Plataforma
 
