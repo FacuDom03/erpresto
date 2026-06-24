@@ -14,11 +14,29 @@ export interface ProductListResult {
 }
 
 function normalizeProductList(raw: unknown): ProductListResult {
-  const res = raw as { data?: Product[]; total?: number };
-  return {
-    data: Array.isArray(res?.data) ? res.data : [],
-    total: typeof res?.total === "number" ? res.total : 0,
+  // El backend de productos devuelve { items, meta: { total } }; otros
+  // módulos devuelven { data, total }. Aceptamos ambas formas (y un
+  // array plano) para no depender de un único contrato.
+  const res = raw as {
+    data?: Product[];
+    items?: Product[];
+    total?: number;
+    meta?: { total?: number };
   };
+  const list = Array.isArray(res?.data)
+    ? res.data
+    : Array.isArray(res?.items)
+      ? res.items
+      : Array.isArray(raw)
+        ? (raw as Product[])
+        : [];
+  const total =
+    typeof res?.total === "number"
+      ? res.total
+      : typeof res?.meta?.total === "number"
+        ? res.meta.total
+        : list.length;
+  return { data: list, total };
 }
 
 export interface ProductListParams {
