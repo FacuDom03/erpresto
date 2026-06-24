@@ -10,8 +10,11 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { CustomersModule } from './customers/customers.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { DeliveryModule } from './delivery/delivery.module';
 import { HealthModule } from './health/health.module';
+import { InvoicingModule } from './invoicing/invoicing.module';
 import { KitchenModule } from './kitchen/kitchen.module';
+import { PaymentsMpModule } from './payments-mp/payments-mp.module';
 import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductStockModule } from './product-stock/product-stock.module';
@@ -20,6 +23,7 @@ import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { RawMaterialsModule } from './raw-materials/raw-materials.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { RecipesModule } from './recipes/recipes.module';
+import { ReportsModule } from './reports/reports.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { RolesModule } from './roles/roles.module';
 import { SalonModule } from './salon/salon.module';
@@ -53,6 +57,10 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     CustomersModule,
     ReservationsModule,
+    InvoicingModule,
+    PaymentsMpModule,
+    DeliveryModule,
+    ReportsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignRolesDto } from './dto/assign-roles.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { QueryUsersDto } from './dto/query-users.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 const BCRYPT_ROUNDS = 10;
@@ -31,9 +32,17 @@ const USER_SELECT = {
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(tenantId: string) {
+  async findAll(tenantId: string, query: QueryUsersDto = {}) {
     const users = await this.prisma.user.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...(query.role
+          ? { userRoles: { some: { role: { code: query.role } } } }
+          : {}),
+        ...(query.branchId
+          ? { userBranches: { some: { branchId: query.branchId } } }
+          : {}),
+      },
       orderBy: { createdAt: 'asc' },
       select: USER_SELECT,
     });

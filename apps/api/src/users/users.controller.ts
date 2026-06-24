@@ -1,10 +1,22 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  ForbiddenException,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../common/decorators/require-permissions.decorator';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AssignRolesDto } from './dto/assign-roles.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { QueryUsersDto } from './dto/query-users.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
@@ -15,9 +27,15 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @RequirePermissions('users.view')
-  findAll(@CurrentUser() user: JwtPayload) {
-    return this.usersService.findAll(user.tenantId);
+  findAll(@CurrentUser() user: JwtPayload, @Query() query: QueryUsersDto) {
+    // El listado general requiere users.view; el filtro por rol (ej. para
+    // armar el desplegable de repartidores) se habilita también con
+    // sales.view, sin inflar el RBAC con un permiso nuevo.
+    const granted = new Set(user.permissions ?? []);
+    if (!granted.has('users.view') && !(query.role && granted.has('sales.view'))) {
+      throw new ForbiddenException('Permisos faltantes: users.view');
+    }
+    return this.usersService.findAll(user.tenantId, query);
   }
 
   @Get(':id')
