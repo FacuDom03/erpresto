@@ -9,7 +9,9 @@ import {
   Ban,
   ChefHat,
   CreditCard,
+  FileText,
   Loader2,
+  MapPin,
   Minus,
   Plus,
   RefreshCw,
@@ -21,7 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { getErrorMessage } from "@/lib/api";
+import { ApiError, getErrorMessage } from "@/lib/api";
 import { useBranch } from "@/lib/branch";
 import { useRealtime } from "@/lib/realtime";
 import {
@@ -39,7 +41,10 @@ import {
   sendOrderToKitchen,
   updateOrder,
   updateOrderItem,
+  upsertOrderDelivery,
 } from "@/lib/orders";
+import { createInvoiceFromOrder } from "@/lib/invoices";
+import { MpPayment } from "@/components/pos/mp-payment";
 import { getCategories, getProducts } from "@/lib/products";
 import { getAreas } from "@/lib/tables";
 import type { OrderItem, PaymentMethod } from "@/lib/types";
@@ -137,6 +142,15 @@ export default function PosOrderPage() {
     if (orderTip !== undefined) setTipInput(String(orderTip));
   }, [orderDiscount, orderTip]);
 
+  // Prefill de los datos de delivery al abrir el dialog.
+  const openDeliveryDialog = () => {
+    const info = order?.delivery;
+    setDeliveryAddress(info?.address ?? "");
+    setDeliveryNotes(info?.notes ?? "");
+    setDeliveryEstimated(info?.estimatedAt ? info.estimatedAt.slice(0, 16) : "");
+    setDeliveryDialogOpen(true);
+  };
+
   // Dialogs
   const [noteDialog, setNoteDialog] = useState<{
     item: OrderItem;
@@ -146,6 +160,10 @@ export default function PosOrderPage() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferTableId, setTransferTableId] = useState("");
+  const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [deliveryEstimated, setDeliveryEstimated] = useState("");
 
   // Pago
   const [payMethod, setPayMethod] = useState<PaymentMethod>("CASH");
@@ -266,6 +284,44 @@ export default function PosOrderPage() {
     onError: onError("No se pudo cancelar el pedido"),
   });
 
+  const deliveryMutation = useMutation({
+    mutationFn: (payload: {
+      address: string;
+      notes?: string;
+      estimatedAt?: string;
+    }) => upsertOrderDelivery(orderId, payload),
+    onSuccess: () => {
+      toast.success("Datos de delivery guardados");
+      invalidateOrder();
+      void queryClient.invalidateQueries({ queryKey: ["deliveries"] });
+      setDeliveryDialogOpen(false);
+    },
+    onError: onError("No se pudieron guardar los datos de delivery"),
+  });
+
+  const invoiceMutation = useMutation({
+    mutationFn: () => createInvoiceFromOrder(orderId),
+    onSuccess: (invoice) => {
+      void queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      toast.success(
+        `Comprobante ${invoice.formattedNumber} emitido${invoice.cae ? ` · CAE ${invoice.cae}` : ""}`,
+        {
+          action: {
+            label: "Ver factura",
+            onClick: () => router.push(`/facturacion/${invoice.id}`),
+          },
+        },
+      );
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error("Este pedido ya tiene una factura emitida.");
+        return;
+      }
+      toast.error(getErrorMessage(err, "No se pudo facturar el pedido"));
+    },
+  });
+
   const commitAmount = (field: "discount" | "tip", raw: string) => {
     if (!order || !isOpen) return;
     const value = Math.max(0, Number(raw) || 0);
@@ -351,6 +407,17 @@ export default function PosOrderPage() {
           >
             <ArrowRightLeft />
             Transferir mesa
+          </Button>
+        )}
+        {order.type === "DELIVERY" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openDeliveryDialog}
+            disabled={!isOpen && !order.delivery}
+          >
+            <MapPin />
+            {order.delivery?.address ? "Editar dirección" : "Cargar dirección"}
           </Button>
         )}
       </div>
@@ -450,6 +517,30 @@ export default function PosOrderPage() {
             <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
               Ticket
             </p>
+
+            {order.type === "DELIVERY" && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <p className="flex items-start gap-1.5">
+                  <MapPin className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    {order.delivery?.address ? (
+                      <span className="font-medium">
+                        {order.delivery.address}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Sin dirección cargada
+                      </span>
+                    )}
+                    {order.delivery?.notes && (
+                      <span className="block text-xs text-muted-foreground">
+                        {order.delivery.notes}
+                      </span>
+                    )}
+                  </span>
+                </p>
+              </div>
+            )}
 
             {visibleItems.length === 0 ? (
               <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
@@ -652,6 +743,21 @@ export default function PosOrderPage() {
                 </Button>
               </div>
             )}
+
+            {order.status === "CLOSED" && (
+              <Button
+                className="h-12 w-full text-base"
+                disabled={invoiceMutation.isPending}
+                onClick={() => invoiceMutation.mutate()}
+              >
+                {invoiceMutation.isPending ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <FileText />
+                )}
+                Facturar
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -780,23 +886,33 @@ export default function PosOrderPage() {
               </Button>
             </div>
           </div>
-          <Button
-            className="w-full"
-            disabled={
-              addPaymentMutation.isPending || !(Number(payAmount) > 0)
-            }
-            onClick={() =>
-              addPaymentMutation.mutate({
-                method: payMethod,
-                amount: Number(payAmount),
-              })
-            }
-          >
-            {addPaymentMutation.isPending && (
-              <Loader2 className="animate-spin" />
-            )}
-            Agregar pago
-          </Button>
+          {payMethod === "MERCADOPAGO" ? (
+            <MpPayment
+              orderId={orderId}
+              amount={Number(payAmount) || 0}
+              onApproved={() => {
+                invalidateOrder();
+                void queryClient.invalidateQueries({ queryKey: ["cash"] });
+                toast.success("Pago de Mercado Pago acreditado");
+              }}
+            />
+          ) : (
+            <Button
+              className="w-full"
+              disabled={addPaymentMutation.isPending || !(Number(payAmount) > 0)}
+              onClick={() =>
+                addPaymentMutation.mutate({
+                  method: payMethod,
+                  amount: Number(payAmount),
+                })
+              }
+            >
+              {addPaymentMutation.isPending && (
+                <Loader2 className="animate-spin" />
+              )}
+              Agregar pago
+            </Button>
+          )}
         </div>
 
         <DialogFooter>
@@ -895,6 +1011,75 @@ export default function PosOrderPage() {
               <Loader2 className="animate-spin" />
             )}
             Transferir
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog de datos de delivery */}
+      <Dialog
+        open={deliveryDialogOpen}
+        onOpenChange={setDeliveryDialogOpen}
+        className="max-w-md"
+      >
+        <DialogHeader>
+          <DialogTitle>Datos de delivery</DialogTitle>
+          <DialogDescription>
+            Dirección de entrega y datos para el repartidor.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="delivery-address">Dirección</Label>
+            <Input
+              id="delivery-address"
+              value={deliveryAddress}
+              onChange={(event) => setDeliveryAddress(event.target.value)}
+              placeholder="Calle 123, piso/depto, barrio"
+              autoFocus
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="delivery-notes">Notas (opcional)</Label>
+            <Textarea
+              id="delivery-notes"
+              value={deliveryNotes}
+              onChange={(event) => setDeliveryNotes(event.target.value)}
+              placeholder="Timbre, referencias, indicaciones…"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="delivery-estimated">
+              Horario estimado (opcional)
+            </Label>
+            <Input
+              id="delivery-estimated"
+              type="datetime-local"
+              value={deliveryEstimated}
+              onChange={(event) => setDeliveryEstimated(event.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setDeliveryDialogOpen(false)}
+          >
+            Cancelar
+          </Button>
+          <Button
+            disabled={!deliveryAddress.trim() || deliveryMutation.isPending}
+            onClick={() =>
+              deliveryMutation.mutate({
+                address: deliveryAddress.trim(),
+                notes: deliveryNotes.trim() || undefined,
+                estimatedAt: deliveryEstimated
+                  ? new Date(deliveryEstimated).toISOString()
+                  : undefined,
+              })
+            }
+          >
+            {deliveryMutation.isPending && <Loader2 className="animate-spin" />}
+            Guardar
           </Button>
         </DialogFooter>
       </Dialog>

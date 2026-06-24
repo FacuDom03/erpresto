@@ -13,7 +13,7 @@ import { API_URL, getAccessToken } from "@/lib/api";
  */
 const EVENT_QUERY_PREFIXES: Record<string, string[]> = {
   "table.updated": ["areas"],
-  "order.updated": ["orders", "areas"],
+  "order.updated": ["orders", "areas", "deliveries"],
   "kitchen.updated": ["kitchen", "orders"],
   "cash.updated": ["cash"],
 };

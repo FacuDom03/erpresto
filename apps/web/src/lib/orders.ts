@@ -1,6 +1,9 @@
 import { apiFetch } from "@/lib/api";
 import { toNumber } from "@/lib/utils";
 import type {
+  DeliveryInfo,
+  MpPaymentIntent,
+  MpPaymentStatus,
   Order,
   OrderItem,
   OrderItemStatus,
@@ -74,6 +77,18 @@ export function normalizeOrder(raw: unknown): Order {
     closedAt: typeof o.closedAt === "string" ? o.closedAt : null,
     items: Array.isArray(o.items) ? o.items.map(normalizeItem) : [],
     payments: Array.isArray(o.payments) ? o.payments.map(normalizePayment) : [],
+    delivery: normalizeDeliveryInfo(o.delivery),
+  };
+}
+
+function normalizeDeliveryInfo(raw: unknown): DeliveryInfo | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  return {
+    address: typeof d.address === "string" ? d.address : null,
+    notes: typeof d.notes === "string" ? d.notes : null,
+    estimatedAt: typeof d.estimatedAt === "string" ? d.estimatedAt : null,
+    deliveredAt: typeof d.deliveredAt === "string" ? d.deliveredAt : null,
   };
 }
 
@@ -231,6 +246,47 @@ export function extractConflictOrderId(data: unknown): string | null {
     if (typeof inner.orderId === "string") return inner.orderId;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Delivery del pedido (upsert) y Mercado Pago (QR)
+// ---------------------------------------------------------------------------
+
+export function upsertOrderDelivery(
+  orderId: string,
+  payload: { address: string; notes?: string; estimatedAt?: string },
+): Promise<unknown> {
+  return apiFetch<unknown>(`/orders/${orderId}/delivery`, {
+    method: "PUT",
+    body: payload,
+  });
+}
+
+export async function createMpPayment(
+  orderId: string,
+  amount: number,
+): Promise<MpPaymentIntent> {
+  const raw = await apiFetch<unknown>(`/orders/${orderId}/mp-payment`, {
+    method: "POST",
+    body: { amount },
+  });
+  const o = raw as Record<string, unknown>;
+  return {
+    externalId: String(o.externalId ?? ""),
+    qrData: String(o.qrData ?? ""),
+    amount: toNumber(o.amount),
+    status: (o.status as MpPaymentStatus) ?? "pending",
+  };
+}
+
+export async function getMpPaymentStatus(
+  externalId: string,
+): Promise<MpPaymentStatus> {
+  const raw = await apiFetch<unknown>(
+    `/mp-payments/${encodeURIComponent(externalId)}/status`,
+  );
+  const o = raw as Record<string, unknown>;
+  return (o.status as MpPaymentStatus) ?? "pending";
 }
 
 // Etiquetas en español (compartidas por POS, pedidos y mesas)

@@ -152,6 +152,8 @@ export interface Order {
   closedAt?: string | null;
   items: OrderItem[];
   payments: Payment[];
+  /** Info de delivery (solo en pedidos tipo DELIVERY). */
+  delivery?: DeliveryInfo | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +430,146 @@ export interface DashboardSummary {
     items: { name: string; quantity: number; minStock: number }[];
   };
   upcomingReservations: number;
+}
+
+// ---------------------------------------------------------------------------
+// Facturación (ARCA / AFIP)
+// ---------------------------------------------------------------------------
+
+export type InvoiceType =
+  | "FACTURA_A"
+  | "FACTURA_B"
+  | "FACTURA_C"
+  | "NOTA_CREDITO_A"
+  | "NOTA_CREDITO_B"
+  | "NOTA_CREDITO_C";
+
+export type InvoiceStatus =
+  | "DRAFT"
+  | "PENDING_CAE"
+  | "ISSUED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export interface InvoiceLine {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  /** Alícuota de IVA (por ej. 21, 10.5, 0). */
+  taxRate: number;
+  netAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+}
+
+export interface Invoice {
+  id: string;
+  type: InvoiceType;
+  status: InvoiceStatus;
+  /** Punto de venta (int) — parte izquierda del número. */
+  pointOfSale: number;
+  /** Número correlativo del comprobante. */
+  number: number;
+  /** Número formateado 0001-00000123 (calculado en el normalizador). */
+  formattedNumber: string;
+  customerName: string | null;
+  customerTaxId: string | null;
+  /** Condición de IVA del cliente, si la informa el backend. */
+  customerIvaCondition?: string | null;
+  orderId: string | null;
+  orderNumber: number | null;
+  netAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+  cae: string | null;
+  caeExpiry: string | null;
+  /** Factura origen de una nota de crédito. */
+  originInvoiceId?: string | null;
+  /** true si el comprobante fue emitido por el proveedor mock (sin CAE real). */
+  isMock: boolean;
+  issuedAt: string | null;
+  createdAt?: string;
+  lines: InvoiceLine[];
+}
+
+// ---------------------------------------------------------------------------
+// Mercado Pago (QR dinámico)
+// ---------------------------------------------------------------------------
+
+export type MpPaymentStatus = "pending" | "approved" | "rejected";
+
+export interface MpPaymentIntent {
+  externalId: string;
+  qrData: string;
+  amount: number;
+  status: MpPaymentStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Delivery
+// ---------------------------------------------------------------------------
+
+export type DeliveryStatus =
+  | "PENDING"
+  | "ASSIGNED"
+  | "IN_TRANSIT"
+  | "DELIVERED"
+  | "CANCELLED";
+
+export interface DeliveryInfo {
+  address: string | null;
+  notes: string | null;
+  estimatedAt: string | null;
+  deliveredAt: string | null;
+}
+
+export interface Delivery {
+  /** id = order.id (relación 1-1). */
+  id: string;
+  orderId: string;
+  orderNumber: number | null;
+  status: DeliveryStatus;
+  address: string | null;
+  notes: string | null;
+  estimatedAt: string | null;
+  deliveredAt: string | null;
+  total: number;
+  customerName: string | null;
+  customerPhone: string | null;
+  courier: { id: string; name: string } | null;
+}
+
+// ---------------------------------------------------------------------------
+// Reportes
+// ---------------------------------------------------------------------------
+
+export type ReportKey =
+  | "sales"
+  | "products"
+  | "waiters"
+  | "cash"
+  | "stock"
+  | "purchases";
+
+// El backend usa `currency`; aceptamos `money` como alias por compatibilidad.
+export type ReportColumnType =
+  | "currency"
+  | "money"
+  | "number"
+  | "date"
+  | "string";
+
+export interface ReportColumn {
+  key: string;
+  label: string;
+  type: ReportColumnType;
+}
+
+export interface ReportData {
+  columns: ReportColumn[];
+  rows: Record<string, unknown>[];
+  totals: Record<string, unknown> | null;
 }
 
 // ---------------------------------------------------------------------------
