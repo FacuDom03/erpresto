@@ -21,11 +21,27 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { AddItemsDto } from './dto/add-items.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { FireOrderDto } from './dto/fire-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderItemDto } from './dto/update-item.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 
 type Tx = Prisma.TransactionClient;
+
+// Course por defecto según nombre de categoría (sin match => 1)
+const COURSE_BY_CATEGORY: Record<string, number> = {
+  Entradas: 1,
+  'Platos principales': 2,
+  Postres: 3,
+  Bebidas: 1,
+};
+
+function defaultCourseForCategory(categoryName: string | null | undefined): number {
+  if (!categoryName) {
+    return 1;
+  }
+  return COURSE_BY_CATEGORY[categoryName] ?? 1;
+}
 
 const ORDER_INCLUDE = {
   items: { include: { product: { select: { id: true, name: true, sku: true } } } },
@@ -231,6 +247,11 @@ export class OrdersService {
     const productIds = [...new Set(dto.items.map((i) => i.productId))];
     const products = await this.prisma.product.findMany({
       where: { id: { in: productIds }, tenantId, active: true },
+      include: {
+        category: {
+          select: { name: true, defaultStation: true, defaultRequiresPreparation: true },
+        },
+      },
     });
     if (products.length !== productIds.length) {
       throw new BadRequestException('Uno o más productos no pertenecen al tenant o están inactivos');
@@ -241,12 +262,21 @@ export class OrdersService {
       await tx.orderItem.createMany({
         data: dto.items.map((item) => {
           const product = productById.get(item.productId)!;
+          // Snapshot de estación: producto, con fallback a la categoría.
+          const station = product.printStation ?? product.category?.defaultStation ?? null;
+          // Snapshot de requiresPrep: producto, fallback a categoría, default true.
+          const requiresPrep =
+            product.requiresPreparation ?? product.category?.defaultRequiresPreparation ?? true;
+          // Course: override por ítem, si no default por categoría.
+          const course = item.course ?? defaultCourseForCategory(product.category?.name);
           return {
             orderId: id,
             productId: item.productId,
             quantity: new Prisma.Decimal(item.quantity),
             unitPrice: product.price,
-            station: product.printStation,
+            station,
+            requiresPrep,
+            course,
             notes: item.notes,
             status: OrderItemStatus.PENDING,
           };
@@ -261,13 +291,17 @@ export class OrdersService {
 
   async updateItem(
     tenantId: string,
+    userId: string,
     permissions: string[],
     id: string,
     itemId: string,
     dto: UpdateOrderItemDto,
   ) {
     const order = await this.assertOpenOrder(tenantId, id);
-    const item = await this.prisma.orderItem.findFirst({ where: { id: itemId, orderId: id } });
+    const item = await this.prisma.orderItem.findFirst({
+      where: { id: itemId, orderId: id },
+      include: { product: { include: { recipe: { include: { items: true } } } } },
+    });
     if (!item) {
       throw new NotFoundException('Item no encontrado');
     }
@@ -275,12 +309,26 @@ export class OrdersService {
       throw new BadRequestException('El item ya está cancelado');
     }
 
+    // Anular un ítem ya marchado (no PENDING) revierte su stock.
+    const cancellingFired =
+      dto.status === OrderItemStatus.CANCELLED && item.status !== OrderItemStatus.PENDING;
     if (dto.status === OrderItemStatus.CANCELLED) {
       if (item.status !== OrderItemStatus.PENDING && !permissions.includes('sales.cancel')) {
         throw new ForbiddenException('Cancelar un item ya enviado requiere sales.cancel');
       }
     } else if (item.status !== OrderItemStatus.PENDING) {
       throw new BadRequestException('Solo se pueden editar items pendientes');
+    }
+
+    let tenantStockMode: StockConfigMode | null = null;
+    let defaultWarehouseId: string | null = null;
+    if (cancellingFired) {
+      const tenant = await this.prisma.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { stockMode: true },
+      });
+      tenantStockMode = tenant.stockMode;
+      defaultWarehouseId = await this.findDefaultWarehouseId(order.branchId);
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -292,11 +340,39 @@ export class OrdersService {
           ...(dto.status !== undefined ? { status: dto.status } : {}),
         },
       });
+
+      if (cancellingFired && tenantStockMode !== null) {
+        await this.revertStockForItem(tx, {
+          item,
+          branchId: order.branchId,
+          orderId: id,
+          tenantStockMode,
+          defaultWarehouseId,
+          userId,
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId,
+            userId,
+            action: 'sales.cancel',
+            entity: 'OrderItem',
+            entityId: itemId,
+            data: {
+              orderId: id,
+              productId: item.productId,
+              quantity: item.quantity,
+              previousStatus: item.status,
+              reverted: item.product.trackStock,
+            },
+          },
+        });
+      }
+
       return this.recalcTotals(tx, id);
     });
 
     this.realtime.emit('order.updated', order.branchId, id);
-    if (dto.status === OrderItemStatus.CANCELLED && item.status !== OrderItemStatus.PENDING) {
+    if (cancellingFired) {
       this.realtime.emit('kitchen.updated', order.branchId, itemId);
     }
     return updated;
@@ -320,23 +396,63 @@ export class OrdersService {
   }
 
   // ----------------------------------------------------------
-  // Enviar a cocina
+  // Marchar (reemplaza "enviar a cocina"). Descuenta stock acá.
   // ----------------------------------------------------------
-  async send(tenantId: string, id: string) {
+  async fire(tenantId: string, userId: string, id: string, dto: FireOrderDto = {}) {
     const order = await this.assertOpenOrder(tenantId, id);
-    const pending = await this.prisma.orderItem.count({
-      where: { orderId: id, status: OrderItemStatus.PENDING },
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { stockMode: true },
     });
-    if (pending === 0) {
-      throw new BadRequestException('El pedido no tiene items pendientes de envío');
+    const defaultWarehouseId = await this.findDefaultWarehouseId(order.branchId);
+
+    // Ítems PENDING a marchar (todos o de un course concreto).
+    const toFire = await this.prisma.orderItem.findMany({
+      where: {
+        orderId: id,
+        status: OrderItemStatus.PENDING,
+        ...(dto.course !== undefined ? { course: dto.course } : {}),
+      },
+      include: { product: { include: { recipe: { include: { items: true } } } } },
+    });
+    if (toFire.length === 0) {
+      throw new BadRequestException(
+        dto.course !== undefined
+          ? `El pedido no tiene items pendientes en el tiempo ${dto.course}`
+          : 'El pedido no tiene items pendientes de marchar',
+      );
     }
 
+    const anyPrep = toFire.some((i) => i.requiresPrep);
+    const now = new Date();
+
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.orderItem.updateMany({
-        where: { orderId: id, status: OrderItemStatus.PENDING },
-        data: { status: OrderItemStatus.SENT, sentAt: new Date() },
-      });
-      if (order.tableId) {
+      for (const item of toFire) {
+        if (item.requiresPrep) {
+          await tx.orderItem.update({
+            where: { id: item.id },
+            data: { status: OrderItemStatus.SENT, firedAt: now, sentAt: now },
+          });
+        } else {
+          // No pasa por KDS: directo a READY.
+          await tx.orderItem.update({
+            where: { id: item.id },
+            data: { status: OrderItemStatus.READY, firedAt: now, readyAt: now },
+          });
+        }
+        // Descuento de stock AL MARCHAR (idempotente: solo PENDING→…).
+        await this.deductStockForItem(tx, {
+          item,
+          branchId: order.branchId,
+          orderId: id,
+          tenantStockMode: tenant.stockMode,
+          defaultWarehouseId,
+          userId,
+        });
+      }
+
+      // La mesa pasa a WAITING_KITCHEN solo si se marchó algún ítem requiresPrep.
+      if (order.tableId && anyPrep) {
         await tx.diningTable.update({
           where: { id: order.tableId },
           data: { status: TableStatus.WAITING_KITCHEN },
@@ -347,10 +463,91 @@ export class OrdersService {
 
     this.realtime.emit('order.updated', order.branchId, id);
     this.realtime.emit('kitchen.updated', order.branchId, id);
-    if (order.tableId) {
+    if (order.tableId && anyPrep) {
       this.realtime.emit('table.updated', order.branchId, order.tableId);
     }
     return updated;
+  }
+
+  /** Alias retrocompatible: marcha todo el pedido (sin course). */
+  async send(tenantId: string, userId: string, id: string) {
+    return this.fire(tenantId, userId, id, {});
+  }
+
+  // ----------------------------------------------------------
+  // Mozo entrega: READY -> DELIVERED
+  // ----------------------------------------------------------
+  async deliverItem(tenantId: string, id: string, itemId: string) {
+    const order = await this.assertOpenOrder(tenantId, id);
+    const item = await this.prisma.orderItem.findFirst({ where: { id: itemId, orderId: id } });
+    if (!item) {
+      throw new NotFoundException('Item no encontrado');
+    }
+    if (item.status !== OrderItemStatus.READY) {
+      throw new BadRequestException('Solo se pueden entregar items que están listos (READY)');
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: { status: OrderItemStatus.DELIVERED, deliveredAt: new Date() },
+      });
+      return tx.order.findUniqueOrThrow({ where: { id }, include: ORDER_INCLUDE });
+    });
+    this.realtime.emit('order.updated', order.branchId, id);
+    return updated;
+  }
+
+  async deliverAll(tenantId: string, id: string) {
+    const order = await this.assertOpenOrder(tenantId, id);
+    const ready = await this.prisma.orderItem.count({
+      where: { orderId: id, status: OrderItemStatus.READY },
+    });
+    if (ready === 0) {
+      throw new BadRequestException('El pedido no tiene items listos para entregar');
+    }
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.updateMany({
+        where: { orderId: id, status: OrderItemStatus.READY },
+        data: { status: OrderItemStatus.DELIVERED, deliveredAt: new Date() },
+      });
+      return tx.order.findUniqueOrThrow({ where: { id }, include: ORDER_INCLUDE });
+    });
+    this.realtime.emit('order.updated', order.branchId, id);
+    return updated;
+  }
+
+  // ----------------------------------------------------------
+  // Pedir la cuenta
+  // ----------------------------------------------------------
+  async requestBill(tenantId: string, id: string) {
+    const order = await this.assertOpenOrder(tenantId, id);
+    if (!order.tableId) {
+      throw new BadRequestException('El pedido no tiene mesa asignada');
+    }
+    await this.prisma.diningTable.update({
+      where: { id: order.tableId },
+      data: { status: TableStatus.WAITING_BILL },
+    });
+    this.realtime.emit('table.updated', order.branchId, order.tableId);
+    this.realtime.emit('order.updated', order.branchId, id);
+    return this.findOne(tenantId, id);
+  }
+
+  async cancelBillRequest(tenantId: string, id: string) {
+    const order = await this.assertOpenOrder(tenantId, id);
+    if (!order.tableId) {
+      throw new BadRequestException('El pedido no tiene mesa asignada');
+    }
+    const table = await this.prisma.diningTable.findUnique({ where: { id: order.tableId } });
+    if (table?.status === TableStatus.WAITING_BILL) {
+      await this.prisma.diningTable.update({
+        where: { id: order.tableId },
+        data: { status: TableStatus.OCCUPIED },
+      });
+      this.realtime.emit('table.updated', order.branchId, order.tableId);
+    }
+    this.realtime.emit('order.updated', order.branchId, id);
+    return this.findOne(tenantId, id);
   }
 
   // ----------------------------------------------------------
@@ -396,12 +593,7 @@ export class OrdersService {
   // ----------------------------------------------------------
   async close(tenantId: string, userId: string, id: string) {
     const orderHead = await this.assertOpenOrder(tenantId, id);
-    const tenant = await this.prisma.tenant.findUniqueOrThrow({
-      where: { id: tenantId },
-      select: { stockMode: true },
-    });
     const session = await this.findOpenSession(orderHead.branchId);
-    const defaultWarehouseId = await this.findDefaultWarehouseId(orderHead.branchId);
 
     const closed = await this.prisma.$transaction(async (tx) => {
       const totals = await this.recalcTotals(tx, id);
@@ -425,14 +617,7 @@ export class OrdersService {
       const order = await tx.order.update({
         where: { id },
         data: { status: OrderStatus.CLOSED, closedAt: new Date() },
-        include: {
-          ...ORDER_INCLUDE,
-          items: {
-            include: {
-              product: { include: { recipe: { include: { items: true } } } },
-            },
-          },
-        },
+        include: ORDER_INCLUDE,
       });
 
       if (order.tableId) {
@@ -442,12 +627,7 @@ export class OrdersService {
         });
       }
 
-      await this.deductStock(tx, {
-        order,
-        tenantStockMode: tenant.stockMode,
-        defaultWarehouseId,
-        userId,
-      });
+      // El stock se descuenta al MARCHAR (fire), no al cerrar.
 
       return order;
     });
@@ -528,105 +708,194 @@ export class OrdersService {
   }
 
   /**
-   * Descuento de stock al cerrar (regla central del contrato):
+   * Descuento de stock de UN ítem al marchar (regla central):
    * - NONE o trackStock=false: no descuenta.
    * - INDEPENDENT / LINKED_MANUAL: ProductStock -qty (movimiento SALE).
    * - LINKED_AUTO: ProductStock -qty y, si hay receta activa,
    *   materia prima (SALE_CONSUME) en el depósito default.
    * Sin receta NO falla; el stock puede quedar negativo.
    */
-  private async deductStock(
+  private async deductStockForItem(
     tx: Tx,
     params: {
-      order: Prisma.OrderGetPayload<{
-        include: {
-          items: { include: { product: { include: { recipe: { include: { items: true } } } } } };
-        };
+      item: Prisma.OrderItemGetPayload<{
+        include: { product: { include: { recipe: { include: { items: true } } } } };
       }>;
+      branchId: string;
+      orderId: string;
       tenantStockMode: StockConfigMode;
       defaultWarehouseId: string | null;
       userId: string;
     },
   ): Promise<void> {
-    const { order, tenantStockMode, defaultWarehouseId, userId } = params;
+    const { item, branchId, orderId, tenantStockMode, defaultWarehouseId, userId } = params;
+    const product = item.product;
+    const mode = this.effectiveStockMode(product.stockLinkMode, tenantStockMode);
+    if (mode === StockLinkMode.NONE || !product.trackStock) {
+      return;
+    }
 
-    for (const item of order.items) {
-      if (item.status === OrderItemStatus.CANCELLED) {
+    // Descuento de stock de platos (todos los modos restantes)
+    const qty = item.quantity;
+    await tx.productStock.upsert({
+      where: { branchId_productId: { branchId, productId: product.id } },
+      create: { branchId, productId: product.id, quantity: qty.negated() },
+      update: { quantity: { decrement: qty } },
+    });
+    await tx.productStockMovement.create({
+      data: {
+        branchId,
+        productId: product.id,
+        type: ProductMovementType.SALE,
+        quantity: qty.negated(),
+        reference: orderId,
+        userId,
+      },
+    });
+
+    // Descuento de materia prima vía receta (solo LINKED_AUTO)
+    const recipe = product.recipe;
+    if (
+      mode !== StockLinkMode.LINKED_AUTO ||
+      !recipe?.active ||
+      recipe.items.length === 0 ||
+      !defaultWarehouseId
+    ) {
+      return;
+    }
+    const yieldQty = Number(recipe.yieldQuantity) || 1;
+    for (const recipeItem of recipe.items) {
+      const consumedQty = (Number(recipeItem.quantity) * Number(item.quantity)) / yieldQty;
+      if (consumedQty <= 0) {
         continue;
       }
-      const product = item.product;
-      const mode = this.effectiveStockMode(product.stockLinkMode, tenantStockMode);
-      if (mode === StockLinkMode.NONE || !product.trackStock) {
-        continue;
-      }
+      const consumed = new Prisma.Decimal(consumedQty.toFixed(3));
 
-      // Descuento de stock de platos (todos los modos restantes)
-      const qty = item.quantity;
-      await tx.productStock.upsert({
-        where: { branchId_productId: { branchId: order.branchId, productId: product.id } },
-        create: { branchId: order.branchId, productId: product.id, quantity: qty.negated() },
-        update: { quantity: { decrement: qty } },
-      });
-      await tx.productStockMovement.create({
+      await tx.rawStockMovement.create({
         data: {
-          branchId: order.branchId,
-          productId: product.id,
-          type: ProductMovementType.SALE,
-          quantity: qty.negated(),
-          reference: order.id,
+          warehouseId: defaultWarehouseId,
+          rawMaterialId: recipeItem.rawMaterialId,
+          type: RawMovementType.SALE_CONSUME,
+          quantity: consumed.negated(),
+          reference: orderId,
           userId,
         },
       });
 
-      // Descuento de materia prima vía receta (solo LINKED_AUTO)
-      const recipe = product.recipe;
-      if (
-        mode !== StockLinkMode.LINKED_AUTO ||
-        !recipe?.active ||
-        recipe.items.length === 0 ||
-        !defaultWarehouseId
-      ) {
-        continue;
-      }
-      const yieldQty = Number(recipe.yieldQuantity) || 1;
-      for (const recipeItem of recipe.items) {
-        const consumedQty = (Number(recipeItem.quantity) * Number(item.quantity)) / yieldQty;
-        if (consumedQty <= 0) {
-          continue;
-        }
-        const consumed = new Prisma.Decimal(consumedQty.toFixed(3));
-
-        await tx.rawStockMovement.create({
+      // El stock de materia prima vive en lotes: descuenta del
+      // más antiguo (puede quedar negativo, nunca bloquea).
+      const batch = await tx.stockBatch.findFirst({
+        where: { warehouseId: defaultWarehouseId, rawMaterialId: recipeItem.rawMaterialId },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (batch) {
+        await tx.stockBatch.update({
+          where: { id: batch.id },
+          data: { quantity: { decrement: consumed } },
+        });
+      } else {
+        await tx.stockBatch.create({
           data: {
             warehouseId: defaultWarehouseId,
             rawMaterialId: recipeItem.rawMaterialId,
-            type: RawMovementType.SALE_CONSUME,
             quantity: consumed.negated(),
-            reference: order.id,
-            userId,
           },
         });
+      }
+    }
+  }
 
-        // El stock de materia prima vive en lotes: descuenta del
-        // más antiguo (puede quedar negativo, nunca bloquea).
-        const batch = await tx.stockBatch.findFirst({
-          where: { warehouseId: defaultWarehouseId, rawMaterialId: recipeItem.rawMaterialId },
-          orderBy: { createdAt: 'asc' },
+  /**
+   * Revierte el descuento de stock de un ítem ya marchado (anulación).
+   * Crea movimientos inversos (ADJUSTMENT de producción y devolución de
+   * materia prima si aplicó) por la cantidad del ítem. Mismas reglas de modo.
+   */
+  private async revertStockForItem(
+    tx: Tx,
+    params: {
+      item: Prisma.OrderItemGetPayload<{
+        include: { product: { include: { recipe: { include: { items: true } } } } };
+      }>;
+      branchId: string;
+      orderId: string;
+      tenantStockMode: StockConfigMode;
+      defaultWarehouseId: string | null;
+      userId: string;
+    },
+  ): Promise<void> {
+    const { item, branchId, orderId, tenantStockMode, defaultWarehouseId, userId } = params;
+    const product = item.product;
+    const mode = this.effectiveStockMode(product.stockLinkMode, tenantStockMode);
+    if (mode === StockLinkMode.NONE || !product.trackStock) {
+      return;
+    }
+
+    // Devuelve el stock de platos (+qty), movimiento ADJUSTMENT.
+    const qty = item.quantity;
+    await tx.productStock.upsert({
+      where: { branchId_productId: { branchId, productId: product.id } },
+      create: { branchId, productId: product.id, quantity: qty },
+      update: { quantity: { increment: qty } },
+    });
+    await tx.productStockMovement.create({
+      data: {
+        branchId,
+        productId: product.id,
+        type: ProductMovementType.ADJUSTMENT,
+        quantity: qty,
+        reference: orderId,
+        notes: 'Reverso por anulación de ítem marchado',
+        userId,
+      },
+    });
+
+    // Devuelve materia prima vía receta (solo LINKED_AUTO)
+    const recipe = product.recipe;
+    if (
+      mode !== StockLinkMode.LINKED_AUTO ||
+      !recipe?.active ||
+      recipe.items.length === 0 ||
+      !defaultWarehouseId
+    ) {
+      return;
+    }
+    const yieldQty = Number(recipe.yieldQuantity) || 1;
+    for (const recipeItem of recipe.items) {
+      const consumedQty = (Number(recipeItem.quantity) * Number(item.quantity)) / yieldQty;
+      if (consumedQty <= 0) {
+        continue;
+      }
+      const consumed = new Prisma.Decimal(consumedQty.toFixed(3));
+
+      await tx.rawStockMovement.create({
+        data: {
+          warehouseId: defaultWarehouseId,
+          rawMaterialId: recipeItem.rawMaterialId,
+          type: RawMovementType.ADJUSTMENT,
+          quantity: consumed,
+          reference: orderId,
+          notes: 'Reverso por anulación de ítem marchado',
+          userId,
+        },
+      });
+
+      const batch = await tx.stockBatch.findFirst({
+        where: { warehouseId: defaultWarehouseId, rawMaterialId: recipeItem.rawMaterialId },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (batch) {
+        await tx.stockBatch.update({
+          where: { id: batch.id },
+          data: { quantity: { increment: consumed } },
         });
-        if (batch) {
-          await tx.stockBatch.update({
-            where: { id: batch.id },
-            data: { quantity: { decrement: consumed } },
-          });
-        } else {
-          await tx.stockBatch.create({
-            data: {
-              warehouseId: defaultWarehouseId,
-              rawMaterialId: recipeItem.rawMaterialId,
-              quantity: consumed.negated(),
-            },
-          });
-        }
+      } else {
+        await tx.stockBatch.create({
+          data: {
+            warehouseId: defaultWarehouseId,
+            rawMaterialId: recipeItem.rawMaterialId,
+            quantity: consumed,
+          },
+        });
       }
     }
   }

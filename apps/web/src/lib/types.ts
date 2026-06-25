@@ -21,6 +21,10 @@ export interface Category {
   color?: string | null;
   sortOrder?: number;
   parentId?: string | null;
+  /** Estación por defecto para los productos de la categoría. */
+  defaultStation?: string | null;
+  /** Si los productos de la categoría requieren preparación por defecto. */
+  defaultRequiresPreparation?: boolean;
 }
 
 export interface Product {
@@ -31,6 +35,10 @@ export interface Product {
   description?: string | null;
   categoryId?: string | null;
   category?: Category | null;
+  /** Estación de impresión/preparación (Cocina, Barra…). Si es null hereda de la categoría. */
+  printStation?: string | null;
+  /** Si requiere pasar por la pantalla de preparación (KDS). */
+  requiresPreparation?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -122,7 +130,15 @@ export interface OrderItem {
   notes?: string | null;
   status: OrderItemStatus;
   station?: string | null;
+  /** Tiempo/marchado (1=entrada, 2=principal, 3=postre…). */
+  course?: number;
+  /** Snapshot: si el ítem requiere preparación (pasa por KDS). */
+  requiresPrep?: boolean;
   sentAt?: string | null;
+  /** Cuándo se marchó el ítem. */
+  firedAt?: string | null;
+  /** Cuándo lo entregó el mozo. */
+  deliveredAt?: string | null;
 }
 
 export interface Payment {
@@ -167,6 +183,10 @@ export interface KitchenItem {
   notes?: string | null;
   product: { name: string };
   station?: string | null;
+  /** Tiempo/marchado del ítem (1/2/3…). */
+  course?: number;
+  /** Si el ítem requiere preparación. */
+  requiresPrep?: boolean;
   sentAt: string;
   order: {
     id: string;

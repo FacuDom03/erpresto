@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
-  CheckCheck,
   ChefHat,
   Flame,
   Loader2,
@@ -33,9 +32,10 @@ const COLUMNS: {
   status: OrderItemStatus;
   title: string;
   accent: string;
-  nextStatus: OrderItemStatus;
-  nextLabel: string;
-  nextIcon: typeof Check;
+  /** Estado siguiente; READY es terminal en el KDS (la entrega la hace el mozo). */
+  nextStatus?: OrderItemStatus;
+  nextLabel?: string;
+  nextIcon?: typeof Check;
 }[] = [
   {
     status: "SENT",
@@ -57,9 +57,6 @@ const COLUMNS: {
     status: "READY",
     title: "Listo",
     accent: "border-t-emerald-500",
-    nextStatus: "DELIVERED",
-    nextLabel: "Entregar",
-    nextIcon: CheckCheck,
   },
 ];
 
@@ -299,27 +296,36 @@ export default function CocinaPage() {
                                         {item.notes}
                                       </p>
                                     )}
-                                    {item.station && !station && (
-                                      <p className="mt-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                                        {item.station}
-                                      </p>
-                                    )}
+                                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                      {item.station && !station && (
+                                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                          {item.station}
+                                        </span>
+                                      )}
+                                      {item.course != null && (
+                                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                          Tiempo {item.course}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="shrink-0"
-                                    disabled={statusMutation.isPending}
-                                    onClick={() =>
-                                      statusMutation.mutate({
-                                        itemId: item.id,
-                                        status: column.nextStatus,
-                                      })
-                                    }
-                                  >
-                                    <NextIcon />
-                                    {column.nextLabel}
-                                  </Button>
+                                  {column.nextStatus && NextIcon && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="shrink-0"
+                                      disabled={statusMutation.isPending}
+                                      onClick={() =>
+                                        statusMutation.mutate({
+                                          itemId: item.id,
+                                          status: column.nextStatus!,
+                                        })
+                                      }
+                                    >
+                                      <NextIcon />
+                                      {column.nextLabel}
+                                    </Button>
+                                  )}
                                 </li>
                               );
                             })}

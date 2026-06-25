@@ -236,6 +236,9 @@ model Category {
   color     String?
   sortOrder Int        @default(0)
   active    Boolean    @default(true)
+  // Defaults de ruteo/preparación que heredan los productos
+  defaultStation             String?
+  defaultRequiresPreparation Boolean @default(true)
 
   products Product[]
 
@@ -266,6 +269,8 @@ model Product {
   taxRate      Decimal       @default(21) @db.Decimal(5, 2)
   // Destinos de impresión/preparación: cocina, barra, etc.
   printStation String?
+  // false => no pasa por KDS (ej. bebidas embotelladas): va directo a READY al marchar
+  requiresPreparation Boolean @default(true)
   stockLinkMode StockLinkMode @default(INHERIT)
   trackStock   Boolean       @default(false)
   minStock     Decimal?      @db.Decimal(12, 3)
@@ -651,8 +656,12 @@ model OrderItem {
   notes     String?         // observaciones para cocina
   status    OrderItemStatus @default(PENDING)
   station   String?         // cocina, barra...
+  course      Int      @default(1)    // marchado por tiempos (1=entrada, 2=principal, 3=postre…)
+  requiresPrep Boolean @default(true) // snapshot de Product.requiresPreparation al agregar el ítem
+  firedAt     DateTime?               // cuándo se marchó
   sentAt    DateTime?
   readyAt   DateTime?
+  deliveredAt DateTime?
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 

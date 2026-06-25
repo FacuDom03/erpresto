@@ -32,7 +32,12 @@ function normalizeItem(raw: unknown): OrderItem {
     notes: typeof i.notes === "string" && i.notes ? i.notes : null,
     status: (i.status as OrderItemStatus) ?? "PENDING",
     station: typeof i.station === "string" ? i.station : null,
+    course: i.course == null ? undefined : toNumber(i.course),
+    requiresPrep:
+      typeof i.requiresPrep === "boolean" ? i.requiresPrep : undefined,
     sentAt: typeof i.sentAt === "string" ? i.sentAt : null,
+    firedAt: typeof i.firedAt === "string" ? i.firedAt : null,
+    deliveredAt: typeof i.deliveredAt === "string" ? i.deliveredAt : null,
   };
 }
 
@@ -184,7 +189,12 @@ export function addOrderItems(
 export function updateOrderItem(
   orderId: string,
   itemId: string,
-  payload: { quantity?: number; notes?: string; status?: "CANCELLED" },
+  payload: {
+    quantity?: number;
+    notes?: string;
+    course?: number;
+    status?: "CANCELLED";
+  },
 ): Promise<unknown> {
   return apiFetch<unknown>(`/orders/${orderId}/items/${itemId}`, {
     method: "PATCH",
@@ -203,6 +213,51 @@ export function deleteOrderItem(
 
 export function sendOrderToKitchen(orderId: string): Promise<unknown> {
   return apiFetch<unknown>(`/orders/${orderId}/send`, { method: "POST" });
+}
+
+/**
+ * Marcha el pedido (reemplaza "enviar a cocina"). Sin `course` marcha todos
+ * los ítems pendientes; con `course` marcha solo los de ese tiempo.
+ */
+export function fireOrder(
+  orderId: string,
+  course?: number,
+): Promise<unknown> {
+  return apiFetch<unknown>(`/orders/${orderId}/fire`, {
+    method: "POST",
+    body: course != null ? { course } : {},
+  });
+}
+
+/** Marca un ítem READY como DELIVERED (entrega del mozo). */
+export function deliverOrderItem(
+  orderId: string,
+  itemId: string,
+): Promise<unknown> {
+  return apiFetch<unknown>(`/orders/${orderId}/items/${itemId}/deliver`, {
+    method: "PATCH",
+  });
+}
+
+/** Marca DELIVERED todos los ítems READY del pedido. */
+export function deliverAllOrderItems(orderId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/orders/${orderId}/deliver-all`, {
+    method: "POST",
+  });
+}
+
+/** Pide la cuenta: la mesa pasa a "Esperando cuenta". */
+export function requestBill(orderId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/orders/${orderId}/request-bill`, {
+    method: "POST",
+  });
+}
+
+/** Revierte el pedido de cuenta (WAITING_BILL → OCCUPIED). */
+export function cancelBillRequest(orderId: string): Promise<unknown> {
+  return apiFetch<unknown>(`/orders/${orderId}/cancel-bill-request`, {
+    method: "POST",
+  });
 }
 
 export function addOrderPayment(

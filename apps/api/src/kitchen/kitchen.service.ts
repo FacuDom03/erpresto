@@ -10,12 +10,12 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { QueryKitchenItemsDto } from './dto/query-kitchen-items.dto';
 import { UpdateKitchenItemStatusDto } from './dto/update-item-status.dto';
 
-// Orden de la cadena de preparación: solo se avanza hacia adelante.
+// Orden de la cadena de preparación en el KDS: solo SENT -> PREPARING -> READY.
+// La entrega (DELIVERED) ya no se hace desde el KDS sino desde el POS (mozo).
 const FLOW: OrderItemStatus[] = [
   OrderItemStatus.SENT,
   OrderItemStatus.PREPARING,
   OrderItemStatus.READY,
-  OrderItemStatus.DELIVERED,
 ];
 
 const DEFAULT_STATUSES: OrderItemStatus[] = [
@@ -36,6 +36,9 @@ export class KitchenService {
     return this.prisma.orderItem.findMany({
       where: {
         status: { in: statuses },
+        // Los ítems sin preparación (ej. bebidas de heladera) van directo
+        // a READY al marchar y nunca pasan por el KDS.
+        requiresPrep: true,
         ...(query.station ? { station: query.station } : {}),
         order: {
           tenantId,
@@ -49,6 +52,9 @@ export class KitchenService {
         quantity: true,
         notes: true,
         station: true,
+        course: true,
+        requiresPrep: true,
+        firedAt: true,
         sentAt: true,
         readyAt: true,
         product: { select: { id: true, name: true } },
@@ -91,12 +97,17 @@ export class KitchenService {
       if (item.status === OrderItemStatus.CANCELLED) {
         throw new BadRequestException('El item ya está cancelado');
       }
+    } else if (dto.status === OrderItemStatus.DELIVERED) {
+      // La entrega ya no se hace desde el KDS (la hace el mozo en el POS).
+      throw new BadRequestException(
+        'El KDS no puede marcar DELIVERED: la entrega la realiza el mozo desde el POS',
+      );
     } else {
       const from = FLOW.indexOf(item.status);
       const to = FLOW.indexOf(dto.status);
       if (from === -1 || to === -1 || to <= from) {
         throw new BadRequestException(
-          `Transición inválida: ${item.status} -> ${dto.status} (flujo SENT -> PREPARING -> READY -> DELIVERED)`,
+          `Transición inválida: ${item.status} -> ${dto.status} (flujo SENT -> PREPARING -> READY)`,
         );
       }
     }

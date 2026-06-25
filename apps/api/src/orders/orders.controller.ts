@@ -16,6 +16,7 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { AddItemsDto } from './dto/add-items.dto';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { FireOrderDto } from './dto/fire-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderItemDto } from './dto/update-item.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
@@ -73,7 +74,14 @@ export class OrdersController {
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateOrderItemDto,
   ) {
-    return this.ordersService.updateItem(user.tenantId, user.permissions ?? [], id, itemId, dto);
+    return this.ordersService.updateItem(
+      user.tenantId,
+      user.sub,
+      user.permissions ?? [],
+      id,
+      itemId,
+      dto,
+    );
   }
 
   @Delete(':id/items/:itemId')
@@ -86,10 +94,49 @@ export class OrdersController {
     return this.ordersService.removeItem(user.tenantId, id, itemId);
   }
 
+  @Post(':id/fire')
+  @RequirePermissions('sales.create')
+  fire(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: FireOrderDto,
+  ) {
+    return this.ordersService.fire(user.tenantId, user.sub, id, dto);
+  }
+
+  // Alias retrocompatible de fire (marcha todo, sin course).
   @Post(':id/send')
   @RequirePermissions('sales.create')
   send(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return this.ordersService.send(user.tenantId, id);
+    return this.ordersService.send(user.tenantId, user.sub, id);
+  }
+
+  @Patch(':id/items/:itemId/deliver')
+  @RequirePermissions('sales.update')
+  deliverItem(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    return this.ordersService.deliverItem(user.tenantId, id, itemId);
+  }
+
+  @Post(':id/deliver-all')
+  @RequirePermissions('sales.update')
+  deliverAll(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.deliverAll(user.tenantId, id);
+  }
+
+  @Post(':id/request-bill')
+  @RequirePermissions('sales.update')
+  requestBill(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.requestBill(user.tenantId, id);
+  }
+
+  @Post(':id/cancel-bill-request')
+  @RequirePermissions('sales.update')
+  cancelBillRequest(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.cancelBillRequest(user.tenantId, id);
   }
 
   @Post(':id/payments')

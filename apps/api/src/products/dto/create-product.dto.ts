@@ -56,6 +56,13 @@ export class CreateProductDto {
   @IsString()
   printStation?: string;
 
+  @ApiPropertyOptional({
+    description: 'Requiere preparación (pasa por KDS). Si se omite, hereda de la categoría',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requiresPreparation?: boolean;
+
   @ApiPropertyOptional({ enum: StockLinkMode, default: StockLinkMode.INHERIT })
   @IsOptional()
   @IsEnum(StockLinkMode)

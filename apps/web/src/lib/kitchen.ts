@@ -25,7 +25,15 @@ function normalizeKitchenItem(raw: unknown): KitchenItem {
     notes: typeof i.notes === "string" && i.notes ? i.notes : null,
     product: { name: String(product?.name ?? "Producto") },
     station: typeof i.station === "string" && i.station ? i.station : null,
-    sentAt: typeof i.sentAt === "string" ? i.sentAt : new Date().toISOString(),
+    course: i.course == null ? undefined : toNumber(i.course),
+    requiresPrep:
+      typeof i.requiresPrep === "boolean" ? i.requiresPrep : undefined,
+    sentAt:
+      typeof i.firedAt === "string"
+        ? i.firedAt
+        : typeof i.sentAt === "string"
+          ? i.sentAt
+          : new Date().toISOString(),
     order: {
       id: String(order?.id ?? ""),
       number: order?.number == null ? undefined : toNumber(order.number),

@@ -70,6 +70,10 @@ export interface ProductPayload {
   price: number;
   categoryId?: string | null;
   description?: string | null;
+  /** Estación de preparación. null/empty → hereda de la categoría. */
+  printStation?: string | null;
+  /** Si requiere preparación (pasa por el KDS). */
+  requiresPreparation?: boolean;
 }
 
 export function createProduct(payload: ProductPayload): Promise<Product> {

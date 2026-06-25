@@ -37,6 +37,10 @@ export class CategoriesService {
         parentId: dto.parentId,
         color: dto.color,
         sortOrder: dto.sortOrder ?? 0,
+        ...(dto.defaultStation !== undefined ? { defaultStation: dto.defaultStation } : {}),
+        ...(dto.defaultRequiresPreparation !== undefined
+          ? { defaultRequiresPreparation: dto.defaultRequiresPreparation }
+          : {}),
       },
     });
   }
@@ -57,6 +61,10 @@ export class CategoriesService {
         ...(dto.color !== undefined ? { color: dto.color } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
         ...(dto.active !== undefined ? { active: dto.active } : {}),
+        ...(dto.defaultStation !== undefined ? { defaultStation: dto.defaultStation } : {}),
+        ...(dto.defaultRequiresPreparation !== undefined
+          ? { defaultRequiresPreparation: dto.defaultRequiresPreparation }
+          : {}),
       },
     });
   }

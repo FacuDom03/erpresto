@@ -25,8 +25,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 const DEFAULT_COLOR = "#f97316";
+
+const STATION_SUGGESTIONS = ["Cocina", "Barra", "Parrilla", "Postres"];
 
 const categorySchema = z.object({
   name: z
@@ -39,6 +42,8 @@ const categorySchema = z.object({
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed >= 0;
   }, "Ingresá un orden válido (entero ≥ 0)"),
+  defaultStation: z.string().max(60, "Máximo 60 caracteres"),
+  defaultRequiresPreparation: z.enum(["true", "false"]),
 });
 
 type CategoryFormValues = z.infer<typeof categorySchema>;
@@ -65,7 +70,13 @@ export function CategoryDialog({
     formState: { errors },
   } = useForm<CategoryFormValues>({
     resolver: zodResolver(categorySchema),
-    defaultValues: { name: "", color: DEFAULT_COLOR, sortOrder: "" },
+    defaultValues: {
+      name: "",
+      color: DEFAULT_COLOR,
+      sortOrder: "",
+      defaultStation: "",
+      defaultRequiresPreparation: "true",
+    },
   });
 
   // Re-sincroniza el formulario cada vez que se abre el dialog.
@@ -76,6 +87,9 @@ export function CategoryDialog({
         color: category?.color ?? DEFAULT_COLOR,
         sortOrder:
           category?.sortOrder != null ? String(category.sortOrder) : "",
+        defaultStation: category?.defaultStation ?? "",
+        defaultRequiresPreparation:
+          category?.defaultRequiresPreparation === false ? "false" : "true",
       });
     }
   }, [open, category, reset]);
@@ -102,6 +116,8 @@ export function CategoryDialog({
       name: values.name.trim(),
       color: values.color,
       sortOrder: values.sortOrder.trim() ? Number(values.sortOrder) : 0,
+      defaultStation: values.defaultStation.trim() || null,
+      defaultRequiresPreparation: values.defaultRequiresPreparation === "true",
     });
   };
 
@@ -157,6 +173,46 @@ export function CategoryDialog({
             )}
           </div>
         </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="category-station">Estación por defecto</Label>
+            <Input
+              id="category-station"
+              list="category-station-suggestions"
+              placeholder="Cocina, Barra, Parrilla…"
+              {...register("defaultStation")}
+            />
+            <datalist id="category-station-suggestions">
+              {STATION_SUGGESTIONS.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            {errors.defaultStation && (
+              <p className="text-xs text-destructive">
+                {errors.defaultStation.message}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="category-requires-prep">
+              Requiere preparación
+            </Label>
+            <Select
+              id="category-requires-prep"
+              {...register("defaultRequiresPreparation")}
+            >
+              <option value="true">Sí, pasa por la pantalla</option>
+              <option value="false">No (entrega directa)</option>
+            </Select>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          Los productos heredan estos valores cuando no definen una estación o
+          el modo de preparación propio.
+        </p>
 
         <DialogFooter>
           <Button

@@ -437,20 +437,50 @@ async function seedDemoTenant(roleIds: Map<string, string>): Promise<void> {
     create: { userId: admin.id, branchId: branch.id },
   });
 
-  // Categorías
-  const categoryNames = ['Entradas', 'Platos principales', 'Postres', 'Bebidas'];
+  // Categorías con estación por defecto.
+  // Bebidas → Barra y por defecto sin preparación (heladera);
+  // el resto → Cocina con preparación.
+  const categoryDefs: {
+    name: string;
+    defaultStation: string;
+    defaultRequiresPreparation: boolean;
+  }[] = [
+    { name: 'Entradas', defaultStation: 'Cocina', defaultRequiresPreparation: true },
+    { name: 'Platos principales', defaultStation: 'Cocina', defaultRequiresPreparation: true },
+    { name: 'Postres', defaultStation: 'Cocina', defaultRequiresPreparation: true },
+    { name: 'Bebidas', defaultStation: 'Barra', defaultRequiresPreparation: false },
+  ];
   const categories = new Map<string, string>();
-  for (const [i, name] of categoryNames.entries()) {
-    let category = await prisma.category.findFirst({ where: { tenantId: tenant.id, name } });
+  for (const [i, def] of categoryDefs.entries()) {
+    let category = await prisma.category.findFirst({
+      where: { tenantId: tenant.id, name: def.name },
+    });
     if (!category) {
       category = await prisma.category.create({
-        data: { tenantId: tenant.id, name, sortOrder: i },
+        data: {
+          tenantId: tenant.id,
+          name: def.name,
+          sortOrder: i,
+          defaultStation: def.defaultStation,
+          defaultRequiresPreparation: def.defaultRequiresPreparation,
+        },
+      });
+    } else {
+      category = await prisma.category.update({
+        where: { id: category.id },
+        data: {
+          defaultStation: def.defaultStation,
+          defaultRequiresPreparation: def.defaultRequiresPreparation,
+        },
       });
     }
-    categories.set(name, category.id);
+    categories.set(def.name, category.id);
   }
 
-  // Productos
+  // Productos. printStation/requiresPreparation se heredan de la
+  // categoría salvo override explícito:
+  //  - Coca/Agua: requiresPreparation=false (heladera, no pasa por KDS).
+  //  - Cerveza artesanal pinta: Barra + requiresPreparation=true (se sirve de canilla).
   const products: {
     name: string;
     sku: string;
@@ -458,6 +488,8 @@ async function seedDemoTenant(roleIds: Map<string, string>): Promise<void> {
     price: number;
     trackStock?: boolean;
     stockLinkMode?: StockLinkMode;
+    printStation?: string;
+    requiresPreparation?: boolean;
   }[] = [
     { name: 'Rabas', sku: 'ENT-RABAS', category: 'Entradas', price: 12500, trackStock: true },
     { name: 'Empanadas de carne (docena)', sku: 'ENT-EMP-CARNE', category: 'Entradas', price: 9600, trackStock: true },
@@ -467,15 +499,20 @@ async function seedDemoTenant(roleIds: Map<string, string>): Promise<void> {
     { name: 'Ñoquis con salsa bolognesa', sku: 'PRI-NOQUIS', category: 'Platos principales', price: 11200 },
     { name: 'Flan casero con dulce de leche', sku: 'POS-FLAN', category: 'Postres', price: 5400, trackStock: true },
     { name: 'Queso y dulce (vigilante)', sku: 'POS-VIGILANTE', category: 'Postres', price: 4800 },
-    { name: 'Coca-Cola 500ml', sku: 'BEB-COCA-500', category: 'Bebidas', price: 2800, stockLinkMode: StockLinkMode.INDEPENDENT, trackStock: true },
-    { name: 'Agua mineral 500ml', sku: 'BEB-AGUA-500', category: 'Bebidas', price: 2200, stockLinkMode: StockLinkMode.INDEPENDENT, trackStock: true },
-    { name: 'Cerveza artesanal pinta', sku: 'BEB-IPA-PINTA', category: 'Bebidas', price: 4500 },
+    { name: 'Coca-Cola 500ml', sku: 'BEB-COCA-500', category: 'Bebidas', price: 2800, stockLinkMode: StockLinkMode.INDEPENDENT, trackStock: true, requiresPreparation: false },
+    { name: 'Agua mineral 500ml', sku: 'BEB-AGUA-500', category: 'Bebidas', price: 2200, stockLinkMode: StockLinkMode.INDEPENDENT, trackStock: true, requiresPreparation: false },
+    { name: 'Cerveza artesanal pinta', sku: 'BEB-IPA-PINTA', category: 'Bebidas', price: 4500, printStation: 'Barra', requiresPreparation: true },
   ];
   const productIds = new Map<string, string>();
   for (const p of products) {
+    const cat = categoryDefs.find((c) => c.name === p.category);
+    // Snapshot efectivo (hereda de la categoría si no hay override).
+    const printStation = p.printStation ?? cat?.defaultStation ?? null;
+    const requiresPreparation =
+      p.requiresPreparation ?? cat?.defaultRequiresPreparation ?? true;
     const product = await prisma.product.upsert({
       where: { tenantId_sku: { tenantId: tenant.id, sku: p.sku } },
-      update: { price: p.price },
+      update: { price: p.price, printStation, requiresPreparation },
       create: {
         tenantId: tenant.id,
         name: p.name,
@@ -484,6 +521,8 @@ async function seedDemoTenant(roleIds: Map<string, string>): Promise<void> {
         price: p.price,
         trackStock: p.trackStock ?? false,
         stockLinkMode: p.stockLinkMode ?? StockLinkMode.INHERIT,
+        printStation,
+        requiresPreparation,
       },
     });
     productIds.set(p.sku, product.id);

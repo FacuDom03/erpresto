@@ -7,13 +7,17 @@ import {
   ArrowLeft,
   ArrowRightLeft,
   Ban,
-  ChefHat,
+  Check,
+  CheckCheck,
   CreditCard,
   FileText,
+  Flame,
   Loader2,
   MapPin,
   Minus,
   Plus,
+  Printer,
+  Receipt,
   RefreshCw,
   Search,
   ServerOff,
@@ -31,14 +35,17 @@ import {
   addOrderPayment,
   cancelOrder,
   closeOrder,
+  deliverAllOrderItems,
+  deliverOrderItem,
   deleteOrderItem,
   deleteOrderPayment,
+  fireOrder,
   getOrder,
   ITEM_STATUS_LABELS,
   ORDER_STATUS_LABELS,
   ORDER_TYPE_LABELS,
   PAYMENT_METHOD_LABELS,
-  sendOrderToKitchen,
+  requestBill,
   updateOrder,
   updateOrderItem,
   upsertOrderDelivery,
@@ -47,7 +54,7 @@ import { createInvoiceFromOrder } from "@/lib/invoices";
 import { MpPayment } from "@/components/pos/mp-payment";
 import { getCategories, getProducts } from "@/lib/products";
 import { getAreas } from "@/lib/tables";
-import type { OrderItem, PaymentMethod } from "@/lib/types";
+import type { Order, OrderItem, PaymentMethod } from "@/lib/types";
 import { cn, formatARS } from "@/lib/utils";
 import type { BadgeProps } from "@/components/ui/badge";
 import { Badge } from "@/components/ui/badge";
@@ -211,6 +218,7 @@ export default function PosOrderPage() {
       itemId: string;
       quantity?: number;
       notes?: string;
+      course?: number;
     }) => updateOrderItem(orderId, itemId, payload),
     onSuccess: () => {
       invalidateOrder();
@@ -236,14 +244,43 @@ export default function PosOrderPage() {
     onError: onError("No se pudo actualizar el pedido"),
   });
 
-  const sendMutation = useMutation({
-    mutationFn: () => sendOrderToKitchen(orderId),
-    onSuccess: () => {
-      toast.success("Pedido enviado a cocina");
+  const fireMutation = useMutation({
+    mutationFn: (course?: number) => fireOrder(orderId, course),
+    onSuccess: (_data, course) => {
+      toast.success(
+        course != null ? `Tiempo ${course} marchado` : "Pedido marchado",
+      );
       invalidateOrder();
       void queryClient.invalidateQueries({ queryKey: ["kitchen"] });
     },
-    onError: onError("No se pudo enviar a cocina"),
+    onError: onError("No se pudo marchar el pedido"),
+  });
+
+  const deliverItemMutation = useMutation({
+    mutationFn: (itemId: string) => deliverOrderItem(orderId, itemId),
+    onSuccess: () => {
+      toast.success("Ítem entregado");
+      invalidateOrder();
+    },
+    onError: onError("No se pudo entregar el ítem"),
+  });
+
+  const deliverAllMutation = useMutation({
+    mutationFn: () => deliverAllOrderItems(orderId),
+    onSuccess: () => {
+      toast.success("Ítems listos entregados");
+      invalidateOrder();
+    },
+    onError: onError("No se pudieron entregar los ítems"),
+  });
+
+  const requestBillMutation = useMutation({
+    mutationFn: () => requestBill(orderId),
+    onSuccess: () => {
+      toast.success("Cuenta pedida");
+      invalidateOrder();
+    },
+    onError: onError("No se pudo pedir la cuenta"),
   });
 
   const addPaymentMutation = useMutation({
@@ -374,13 +411,20 @@ export default function PosOrderPage() {
     );
   }
 
-  const pendingCount = order.items.filter((i) => i.status === "PENDING").length;
+  const pendingItems = order.items.filter((i) => i.status === "PENDING");
+  const pendingCount = pendingItems.length;
+  const readyCount = order.items.filter((i) => i.status === "READY").length;
   const visibleItems = order.items.filter((i) => i.status !== "CANCELLED");
+  // Tiempos (courses) presentes entre los ítems pendientes, para marchar por tiempo.
+  const pendingCourses = Array.from(
+    new Set(pendingItems.map((i) => i.course ?? 1)),
+  ).sort((a, b) => a - b);
   const categories = categoriesQuery.data ?? [];
   const products = productsQuery.data?.data ?? [];
 
   return (
-    <div className="space-y-4">
+    <>
+    <div className="space-y-4 print:hidden">
       {/* Encabezado */}
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => router.push("/pos")}>
@@ -550,8 +594,16 @@ export default function PosOrderPage() {
               <ul className="divide-y">
                 {visibleItems.map((item) => {
                   const isPendingItem = item.status === "PENDING";
+                  const isReady = item.status === "READY";
                   return (
-                    <li key={item.id} className="space-y-1.5 py-2.5">
+                    <li
+                      key={item.id}
+                      className={cn(
+                        "space-y-1.5 py-2.5",
+                        isReady &&
+                          "-mx-2 rounded-md bg-emerald-500/10 px-2 ring-1 ring-inset ring-emerald-500/30",
+                      )}
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">
@@ -567,7 +619,7 @@ export default function PosOrderPage() {
                           {formatARS(item.unitPrice * item.quantity)}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {isPendingItem && isOpen ? (
                           <>
                             <Button
@@ -604,6 +656,22 @@ export default function PosOrderPage() {
                             >
                               <Plus />
                             </Button>
+                            <Select
+                              aria-label="Tiempo"
+                              className="h-7 w-[4.5rem] px-2 text-xs"
+                              value={String(item.course ?? 1)}
+                              disabled={updateItemMutation.isPending}
+                              onChange={(event) =>
+                                updateItemMutation.mutate({
+                                  itemId: item.id,
+                                  course: Number(event.target.value),
+                                })
+                              }
+                            >
+                              <option value="1">T1</option>
+                              <option value="2">T2</option>
+                              <option value="3">T3</option>
+                            </Select>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -632,7 +700,20 @@ export default function PosOrderPage() {
                         ) : (
                           <span className="text-xs text-muted-foreground tabular-nums">
                             x{item.quantity}
+                            {item.course != null && ` · T${item.course}`}
                           </span>
+                        )}
+                        {isReady && isOpen && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                            disabled={deliverItemMutation.isPending}
+                            onClick={() => deliverItemMutation.mutate(item.id)}
+                          >
+                            <Check />
+                            Entregar
+                          </Button>
                         )}
                         <Badge
                           variant={ITEM_STATUS_VARIANT[item.status]}
@@ -710,17 +791,53 @@ export default function PosOrderPage() {
               <div className="space-y-2">
                 <Button
                   className="h-12 w-full text-base"
-                  disabled={pendingCount === 0 || sendMutation.isPending}
-                  onClick={() => sendMutation.mutate()}
+                  disabled={pendingCount === 0 || fireMutation.isPending}
+                  onClick={() => fireMutation.mutate(undefined)}
                 >
-                  {sendMutation.isPending ? (
+                  {fireMutation.isPending ? (
                     <Loader2 className="animate-spin" />
                   ) : (
-                    <ChefHat />
+                    <Flame />
                   )}
-                  Enviar a cocina
+                  Marchar
                   {pendingCount > 0 && ` (${pendingCount})`}
                 </Button>
+
+                {/* Marchar por tiempo cuando hay ítems pendientes de distinto course */}
+                {pendingCourses.length > 1 && (
+                  <div className="flex flex-wrap gap-2">
+                    {pendingCourses.map((course) => (
+                      <Button
+                        key={course}
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        disabled={fireMutation.isPending}
+                        onClick={() => fireMutation.mutate(course)}
+                      >
+                        <Flame />
+                        Marchar tiempo {course}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+
+                {readyCount > 0 && (
+                  <Button
+                    variant="outline"
+                    className="h-12 w-full border-emerald-500/50 text-base text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+                    disabled={deliverAllMutation.isPending}
+                    onClick={() => deliverAllMutation.mutate()}
+                  >
+                    {deliverAllMutation.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <CheckCheck />
+                    )}
+                    Entregar todo ({readyCount})
+                  </Button>
+                )}
+
                 <Button
                   variant="secondary"
                   className="h-12 w-full text-base"
@@ -733,6 +850,34 @@ export default function PosOrderPage() {
                   <CreditCard />
                   Cobrar
                 </Button>
+
+                <div className="flex flex-wrap gap-2">
+                  {order.type === "DINE_IN" && order.tableId && (
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      disabled={requestBillMutation.isPending}
+                      onClick={() => requestBillMutation.mutate()}
+                    >
+                      {requestBillMutation.isPending ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <Receipt />
+                      )}
+                      Pedir cuenta
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    disabled={visibleItems.length === 0}
+                    onClick={() => window.print()}
+                  >
+                    <Printer />
+                    Imprimir precuenta
+                  </Button>
+                </div>
+
                 <Button
                   variant="ghost"
                   className="w-full text-destructive hover:text-destructive"
@@ -1083,6 +1228,93 @@ export default function PosOrderPage() {
           </Button>
         </DialogFooter>
       </Dialog>
+    </div>
+
+      {/* Precuenta: solo visible al imprimir (window.print). Sin valor fiscal. */}
+      <BillPreview
+        order={order}
+        paid={paid}
+        remaining={remaining}
+      />
+    </>
+  );
+}
+
+function BillPreview({
+  order,
+  paid,
+  remaining,
+}: {
+  order: Order;
+  paid: number;
+  remaining: number;
+}) {
+  const items = order.items.filter((i) => i.status !== "CANCELLED");
+  return (
+    <div className="hidden print:block print:text-black">
+      <div className="mx-auto max-w-xs space-y-3 p-2 font-mono text-xs">
+        <div className="text-center">
+          <p className="text-sm font-bold uppercase">ER Presto</p>
+          <p>Precuenta</p>
+          {order.number != null && <p>Pedido #{order.number}</p>}
+          <p>
+            {ORDER_TYPE_LABELS[order.type]}
+            {order.table ? ` · ${order.table.name}` : ""}
+          </p>
+        </div>
+
+        <div className="border-y border-dashed border-black py-2">
+          <table className="w-full">
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td className="align-top">
+                    {item.quantity}× {item.product?.name ?? "Producto"}
+                  </td>
+                  <td className="text-right align-top tabular-nums">
+                    {formatARS(item.unitPrice * item.quantity)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="space-y-0.5">
+          <div className="flex justify-between">
+            <span>Subtotal</span>
+            <span className="tabular-nums">{formatARS(order.subtotal)}</span>
+          </div>
+          {order.discount > 0 && (
+            <div className="flex justify-between">
+              <span>Descuento</span>
+              <span className="tabular-nums">-{formatARS(order.discount)}</span>
+            </div>
+          )}
+          {order.tip > 0 && (
+            <div className="flex justify-between">
+              <span>Propina</span>
+              <span className="tabular-nums">{formatARS(order.tip)}</span>
+            </div>
+          )}
+          <div className="flex justify-between border-t border-black pt-1 text-sm font-bold">
+            <span>Total</span>
+            <span className="tabular-nums">{formatARS(order.total)}</span>
+          </div>
+          {paid > 0 && (
+            <div className="flex justify-between">
+              <span>Pagado</span>
+              <span className="tabular-nums">
+                {formatARS(paid)} · resta {formatARS(remaining)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <p className="text-center font-bold uppercase">
+          NO VÁLIDO COMO FACTURA
+        </p>
+      </div>
     </div>
   );
 }

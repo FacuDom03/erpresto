@@ -46,7 +46,12 @@ const productSchema = z.object({
     }, "Ingresá un precio válido (por ej. 1500 o 1500,50)"),
   categoryId: z.string(),
   description: z.string().max(500, "Máximo 500 caracteres"),
+  printStation: z.string().max(60, "Máximo 60 caracteres"),
+  // Tri-estado como string: "" hereda de la categoría, "true"/"false" explícito.
+  requiresPreparation: z.enum(["", "true", "false"]),
 });
+
+const STATION_SUGGESTIONS = ["Cocina", "Barra", "Parrilla", "Postres"];
 
 type ProductFormValues = z.infer<typeof productSchema>;
 
@@ -82,6 +87,8 @@ export function ProductDialog({
       price: "",
       categoryId: "",
       description: "",
+      printStation: "",
+      requiresPreparation: "",
     },
   });
 
@@ -94,6 +101,13 @@ export function ProductDialog({
         price: product != null ? String(product.price) : "",
         categoryId: product?.categoryId ?? product?.category?.id ?? "",
         description: product?.description ?? "",
+        printStation: product?.printStation ?? "",
+        requiresPreparation:
+          product?.requiresPreparation == null
+            ? ""
+            : product.requiresPreparation
+              ? "true"
+              : "false",
       });
     }
   }, [open, product, reset]);
@@ -124,6 +138,11 @@ export function ProductDialog({
       price: Number(values.price.replace(",", ".")),
       categoryId: values.categoryId || null,
       description: values.description.trim() || null,
+      printStation: values.printStation.trim() || null,
+      requiresPreparation:
+        values.requiresPreparation === ""
+          ? undefined
+          : values.requiresPreparation === "true",
     });
   };
 
@@ -195,6 +214,48 @@ export function ProductDialog({
               No se pudieron cargar las categorías. Podés guardar sin categoría.
             </p>
           )}
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="product-station">Estación</Label>
+            <Input
+              id="product-station"
+              list="product-station-suggestions"
+              placeholder="Cocina, Barra, Parrilla…"
+              {...register("printStation")}
+            />
+            <datalist id="product-station-suggestions">
+              {STATION_SUGGESTIONS.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+            {errors.printStation && (
+              <p className="text-xs text-destructive">
+                {errors.printStation.message}
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Si lo dejás vacío se hereda de la categoría.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="product-requires-prep">
+              Requiere preparación
+            </Label>
+            <Select
+              id="product-requires-prep"
+              {...register("requiresPreparation")}
+            >
+              <option value="">Heredar de la categoría</option>
+              <option value="true">Sí, pasa por la pantalla</option>
+              <option value="false">No (entrega directa)</option>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Las bebidas embotelladas no requieren preparación.
+            </p>
+          </div>
         </div>
 
         <div className="space-y-1.5">

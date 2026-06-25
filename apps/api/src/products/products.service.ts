@@ -68,12 +68,18 @@ export class ProductsService {
   }
 
   async create(tenantId: string, dto: CreateProductDto) {
+    let category: { defaultStation: string | null; defaultRequiresPreparation: boolean } | null =
+      null;
     if (dto.categoryId) {
-      await this.assertCategory(tenantId, dto.categoryId);
+      category = await this.assertCategory(tenantId, dto.categoryId);
     }
     if (dto.sku) {
       await this.assertSkuUnique(tenantId, dto.sku);
     }
+    // Herencia desde la categoría cuando no se especifican explícitamente
+    const printStation = dto.printStation ?? category?.defaultStation ?? null;
+    const requiresPreparation =
+      dto.requiresPreparation ?? category?.defaultRequiresPreparation ?? true;
     return this.prisma.product.create({
       data: {
         tenantId,
@@ -84,7 +90,8 @@ export class ProductsService {
         imageUrl: dto.imageUrl,
         price: new Prisma.Decimal(dto.price),
         ...(dto.taxRate !== undefined ? { taxRate: new Prisma.Decimal(dto.taxRate) } : {}),
-        printStation: dto.printStation,
+        printStation,
+        requiresPreparation,
         ...(dto.stockLinkMode !== undefined ? { stockLinkMode: dto.stockLinkMode } : {}),
         ...(dto.trackStock !== undefined ? { trackStock: dto.trackStock } : {}),
         ...(dto.minStock !== undefined ? { minStock: new Prisma.Decimal(dto.minStock) } : {}),
@@ -112,6 +119,9 @@ export class ProductsService {
         ...(dto.price !== undefined ? { price: new Prisma.Decimal(dto.price) } : {}),
         ...(dto.taxRate !== undefined ? { taxRate: new Prisma.Decimal(dto.taxRate) } : {}),
         ...(dto.printStation !== undefined ? { printStation: dto.printStation } : {}),
+        ...(dto.requiresPreparation !== undefined
+          ? { requiresPreparation: dto.requiresPreparation }
+          : {}),
         ...(dto.stockLinkMode !== undefined ? { stockLinkMode: dto.stockLinkMode } : {}),
         ...(dto.trackStock !== undefined ? { trackStock: dto.trackStock } : {}),
         ...(dto.minStock !== undefined ? { minStock: new Prisma.Decimal(dto.minStock) } : {}),
@@ -127,13 +137,14 @@ export class ProductsService {
     return { success: true };
   }
 
-  private async assertCategory(tenantId: string, categoryId: string): Promise<void> {
+  private async assertCategory(tenantId: string, categoryId: string) {
     const category = await this.prisma.category.findFirst({
       where: { id: categoryId, tenantId },
     });
     if (!category) {
       throw new BadRequestException('La categoría no pertenece al tenant');
     }
+    return category;
   }
 
   private async assertSkuUnique(tenantId: string, sku: string, excludeId?: string): Promise<void> {

@@ -1,5 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class CreateCategoryDto {
   @ApiProperty({ example: 'Platos principales' })
@@ -24,4 +33,15 @@ export class CreateCategoryDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @ApiPropertyOptional({ example: 'Cocina', description: 'Estación por defecto para los productos' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  defaultStation?: string;
+
+  @ApiPropertyOptional({ default: true, description: 'Requiere preparación por defecto' })
+  @IsOptional()
+  @IsBoolean()
+  defaultRequiresPreparation?: boolean;
 }
