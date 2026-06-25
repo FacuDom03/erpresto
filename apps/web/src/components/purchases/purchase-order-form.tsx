@@ -84,8 +84,8 @@ export function PurchaseOrderForm({ branchId, order }: PurchaseOrderFormProps) {
   const isEditing = order != null;
 
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", { page: 1, limit: 1000, search: "" }],
-    queryFn: () => getSuppliers({ page: 1, limit: 1000 }),
+    queryKey: ["suppliers", { page: 1, limit: 500, search: "" }],
+    queryFn: () => getSuppliers({ page: 1, limit: 500 }),
     staleTime: 60_000,
   });
   const rawMaterialsQuery = useQuery({

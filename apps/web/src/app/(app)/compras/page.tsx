@@ -49,8 +49,8 @@ export default function ComprasPage() {
   const [page, setPage] = useState(1);
 
   const suppliersQuery = useQuery({
-    queryKey: ["suppliers", { page: 1, limit: 1000, search: "" }],
-    queryFn: () => getSuppliers({ page: 1, limit: 1000 }),
+    queryKey: ["suppliers", { page: 1, limit: 500, search: "" }],
+    queryFn: () => getSuppliers({ page: 1, limit: 500 }),
     staleTime: 60_000,
   });
 
