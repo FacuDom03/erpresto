@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import {
   updateCategory,
   type CategoryPayload,
 } from "@/lib/categories";
+import { STATIONS_QUERY_KEY, getStations } from "@/lib/stations";
 import type { Category } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,8 +29,6 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 
 const DEFAULT_COLOR = "#f97316";
-
-const STATION_SUGGESTIONS = ["Cocina", "Barra", "Parrilla", "Postres"];
 
 const categorySchema = z.object({
   name: z
@@ -62,6 +61,24 @@ export function CategoryDialog({
 }: CategoryDialogProps) {
   const queryClient = useQueryClient();
   const isEditing = category !== null;
+
+  const stationsQuery = useQuery({
+    queryKey: STATIONS_QUERY_KEY,
+    queryFn: getStations,
+  });
+
+  // Si la categoría ya tiene una estación fuera del catálogo, la conservamos.
+  const stationOptions = useMemo(() => {
+    const list = [...(stationsQuery.data ?? [])];
+    const current = category?.defaultStation;
+    if (
+      current &&
+      !list.some((s) => s.toLowerCase() === current.toLowerCase())
+    ) {
+      list.push(current);
+    }
+    return list;
+  }, [stationsQuery.data, category?.defaultStation]);
 
   const {
     register,
@@ -177,17 +194,14 @@ export function CategoryDialog({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="category-station">Estación por defecto</Label>
-            <Input
-              id="category-station"
-              list="category-station-suggestions"
-              placeholder="Cocina, Barra, Parrilla…"
-              {...register("defaultStation")}
-            />
-            <datalist id="category-station-suggestions">
-              {STATION_SUGGESTIONS.map((s) => (
-                <option key={s} value={s} />
+            <Select id="category-station" {...register("defaultStation")}>
+              <option value="">Sin definir</option>
+              {stationOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
               ))}
-            </datalist>
+            </Select>
             {errors.defaultStation && (
               <p className="text-xs text-destructive">
                 {errors.defaultStation.message}

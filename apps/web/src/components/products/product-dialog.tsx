@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import {
   updateProduct,
   type ProductPayload,
 } from "@/lib/products";
+import { STATIONS_QUERY_KEY, getStations } from "@/lib/stations";
 import type { Category, Product } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,8 +52,6 @@ const productSchema = z.object({
   requiresPreparation: z.enum(["", "true", "false"]),
 });
 
-const STATION_SUGGESTIONS = ["Cocina", "Barra", "Parrilla", "Postres"];
-
 type ProductFormValues = z.infer<typeof productSchema>;
 
 interface ProductDialogProps {
@@ -73,6 +72,25 @@ export function ProductDialog({
 }: ProductDialogProps) {
   const queryClient = useQueryClient();
   const isEditing = product !== null;
+
+  const stationsQuery = useQuery({
+    queryKey: STATIONS_QUERY_KEY,
+    queryFn: getStations,
+  });
+
+  // Lista de estaciones para el Select. Si el producto ya tiene una estación
+  // que no está en el catálogo, la agregamos igual para no perderla.
+  const stationOptions = useMemo(() => {
+    const list = [...(stationsQuery.data ?? [])];
+    const current = product?.printStation;
+    if (
+      current &&
+      !list.some((s) => s.toLowerCase() === current.toLowerCase())
+    ) {
+      list.push(current);
+    }
+    return list;
+  }, [stationsQuery.data, product?.printStation]);
 
   const {
     register,
@@ -219,24 +237,21 @@ export function ProductDialog({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="product-station">Estación</Label>
-            <Input
-              id="product-station"
-              list="product-station-suggestions"
-              placeholder="Cocina, Barra, Parrilla…"
-              {...register("printStation")}
-            />
-            <datalist id="product-station-suggestions">
-              {STATION_SUGGESTIONS.map((s) => (
-                <option key={s} value={s} />
+            <Select id="product-station" {...register("printStation")}>
+              <option value="">Heredar de la categoría</option>
+              {stationOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
               ))}
-            </datalist>
+            </Select>
             {errors.printStation && (
               <p className="text-xs text-destructive">
                 {errors.printStation.message}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              Si lo dejás vacío se hereda de la categoría.
+              ¿Falta una estación? Agregala en Configuración → Estaciones.
             </p>
           </div>
 

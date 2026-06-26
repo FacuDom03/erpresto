@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -17,6 +18,7 @@ import { useBranch } from "@/lib/branch";
 import { useRealtime } from "@/lib/realtime";
 import { getKitchenItems, updateKitchenItemStatus } from "@/lib/kitchen";
 import { ORDER_TYPE_LABELS } from "@/lib/orders";
+import { STATIONS_QUERY_KEY, getStations } from "@/lib/stations";
 import type { KitchenItem, OrderItemStatus } from "@/lib/types";
 import { cn, formatElapsed, minutesSince } from "@/lib/utils";
 import { BranchRequired } from "@/components/branch-required";
@@ -95,12 +97,70 @@ function groupByOrder(items: KitchenItem[]): OrderGroup[] {
   );
 }
 
-export default function CocinaPage() {
+const STATION_STORAGE_PREFIX = "erpresto.kds.station.";
+
+function CocinaScreen() {
   const queryClient = useQueryClient();
   const { branchId } = useBranch();
   useRealtime(branchId);
 
-  const [station, setStation] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const stationsQuery = useQuery({
+    queryKey: STATIONS_QUERY_KEY,
+    queryFn: getStations,
+  });
+
+  // Estación inicial: ?station= de la URL → localStorage por sucursal → "" (Todas).
+  // Se resuelve una sola vez en cliente para no romper la hidratación.
+  const [station, setStationState] = useState("");
+  const [stationReady, setStationReady] = useState(false);
+
+  useEffect(() => {
+    if (stationReady) return;
+    const fromUrl = searchParams.get("station");
+    if (fromUrl != null) {
+      setStationState(fromUrl);
+      setStationReady(true);
+      return;
+    }
+    let fromStorage: string | null = null;
+    if (typeof window !== "undefined" && branchId) {
+      fromStorage = window.localStorage.getItem(
+        `${STATION_STORAGE_PREFIX}${branchId}`,
+      );
+    }
+    setStationState(fromStorage ?? "");
+    setStationReady(true);
+  }, [stationReady, searchParams, branchId]);
+
+  // Cambio de estación: persistir en URL (replace, sin recargar) y localStorage.
+  const setStation = useCallback(
+    (value: string) => {
+      setStationState(value);
+      if (typeof window !== "undefined" && branchId) {
+        const key = `${STATION_STORAGE_PREFIX}${branchId}`;
+        if (value) {
+          window.localStorage.setItem(key, value);
+        } else {
+          window.localStorage.removeItem(key);
+        }
+      }
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) {
+        params.set("station", value);
+      } else {
+        params.delete("station");
+      }
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    },
+    [branchId, pathname, router, searchParams],
+  );
 
   // Tick por segundo para los timers mm:ss.
   const [now, setNow] = useState(() => Date.now());
@@ -141,13 +201,18 @@ export default function CocinaPage() {
 
   const items = useMemo(() => itemsQuery.data ?? [], [itemsQuery.data]);
 
+  // Estaciones del catálogo central + la seleccionada (por si quedó fuera del
+  // catálogo vía URL bookmarkeada), preservando el orden configurado.
   const stations = useMemo(() => {
-    const set = new Set<string>();
-    for (const item of items) {
-      if (item.station) set.add(item.station);
+    const list = [...(stationsQuery.data ?? [])];
+    if (
+      station &&
+      !list.some((s) => s.toLowerCase() === station.toLowerCase())
+    ) {
+      list.push(station);
     }
-    return Array.from(set).sort();
-  }, [items]);
+    return list;
+  }, [stationsQuery.data, station]);
 
   return (
     <div className="space-y-6">
@@ -341,5 +406,14 @@ export default function CocinaPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CocinaPage() {
+  // useSearchParams requiere un límite de Suspense para el build de Next.
+  return (
+    <Suspense fallback={null}>
+      <CocinaScreen />
+    </Suspense>
   );
 }

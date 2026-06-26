@@ -381,6 +381,18 @@ async function seedDemoTenant(roleIds: Map<string, string>): Promise<void> {
     },
   });
 
+  // Catálogo de estaciones por defecto (merge sin pisar otras settings).
+  const currentSettings =
+    tenant.settings && typeof tenant.settings === 'object' && !Array.isArray(tenant.settings)
+      ? (tenant.settings as Record<string, unknown>)
+      : {};
+  if (!Array.isArray(currentSettings.stations) || currentSettings.stations.length === 0) {
+    await prisma.tenant.update({
+      where: { id: tenant.id },
+      data: { settings: { ...currentSettings, stations: ['Cocina', 'Barra'] } },
+    });
+  }
+
   let branch = await prisma.branch.findFirst({
     where: { tenantId: tenant.id, name: 'Casa Central' },
   });
