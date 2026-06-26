@@ -16,7 +16,7 @@ Estrategia: cada fase entrega valor usable en producción para un segmento real 
 - Frontend: login, layout con navegación completa, dashboard (datos de ejemplo), módulo Productos funcional contra la API.
 - Documentación de arquitectura, ERD, módulos y este roadmap.
 
-## Fase 1 — MVP vendible (POS + salón + caja) · ~6-8 semanas
+## Fase 1 — MVP vendible (POS + salón + caja) ✅
 
 **Objetivo:** un restaurante puede operar su día completo con ERPresto.
 
@@ -29,25 +29,23 @@ Estrategia: cada fase entrega valor usable en producción para un segmento real 
 - 2FA y recuperación de contraseña.
 - Tests E2E de los flujos críticos (venta completa, cierre de caja).
 
-## Fase 2 — Operación completa · ~8 semanas
+## Fase 2 — Operación completa ✅ (núcleo)
 
-- App de mozos (PWA móvil) y KDS por estación con notificaciones al mozo.
-- PWA instalable con cache offline básico.
-- Compras: órdenes, recepciones parciales que actualizan stock y costos, comparación de proveedores.
-- Costos y rentabilidad: margen por producto, actualización automática.
-- Reservas con calendario y asignación de mesas.
-- Clientes: historial, cumpleaños, puntos.
-- Dashboard real con KPIs y comparativas entre sucursales; primeros reportes exportables (CSV/Excel/PDF).
-- Inventarios físicos y mermas con flujo guiado.
+- Compras: órdenes, recepciones parciales que actualizan stock y **costo promedio ponderado**, filtros por proveedor. ✅
+- Costos y rentabilidad: costo de receta y margen por producto. ✅
+- Reservas con agenda por día, asignación y bloqueo automático de mesa. ✅
+- Clientes: historial, cumpleaños, estadísticas de consumo. ✅
+- Dashboard real con KPIs y consolidación entre sucursales. ✅
+- Inventarios físicos y mermas (ajustes por tipo) sobre ambos stocks. ✅
+- Pendiente: app de mozos (PWA móvil) con notificaciones, PWA instalable con cache offline. 🔜
 
-## Fase 3 — Argentina-ready · ~8 semanas
+## Fase 3 — Argentina-ready ✅ (núcleo)
 
-- **Facturación ARCA**: factura electrónica A/B/C, notas de crédito, CAE, validaciones, caja diaria fiscal.
-- Integración Mercado Pago (QR + point) y MODO.
-- Delivery: estados, repartidores, integraciones PedidosYa y Rappi.
-- Notificaciones: push, email, WhatsApp (proveedor preparado).
-- Reportes completos con exportación PDF/Excel/CSV.
-- Cuenta corriente de clientes.
+- **Facturación ARCA**: factura electrónica A/B/C, notas de crédito, CAE, IVA desglosado, numeración por punto de venta. ✅ (proveedor mock activo; adaptador real WSFEv1 preparado, se activa con certificado por env)
+- Integración **Mercado Pago** (QR dinámico con aprobación y webhook). ✅ (mock activo; adaptador real por access token). MODO 🔜
+- **Delivery**: estados, asignación de repartidores. ✅ Integraciones PedidosYa/Rappi 🔜
+- **Reportes** completos con exportación PDF/Excel/CSV. ✅
+- Notificaciones (push, email, WhatsApp) y cuenta corriente de clientes. 🔜
 
 ## Fase 4 — Offline first y escala · ~10 semanas
 
